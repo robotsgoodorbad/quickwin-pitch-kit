@@ -17,6 +17,20 @@ export async function POST(request: Request) {
       );
     }
 
+    if (description.length < 40) {
+      return NextResponse.json(
+        { error: "Description must be at least 40 characters. Include who it's for, what it does, and a key constraint." },
+        { status: 400 }
+      );
+    }
+
+    if (description.length > 600) {
+      return NextResponse.json(
+        { error: "Description must be 600 characters or fewer." },
+        { status: 400 }
+      );
+    }
+
     const idea = getIdea(ideaId);
     if (!idea) {
       return NextResponse.json({ error: "Idea not found" }, { status: 404 });

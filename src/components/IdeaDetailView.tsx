@@ -193,32 +193,46 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
   };
 
   /* ── Re-generate custom idea ── */
+  const [regenError, setRegenError] = useState("");
+
   const handleRegenerate = async () => {
-    if (!regenPrompt.trim() || regenerating) return;
+    const trimmed = regenPrompt.trim();
+    if (!trimmed || regenerating) return;
+    if (trimmed.length < 40) {
+      setRegenError("Please enter at least 40 characters.");
+      return;
+    }
     setRegenerating(true);
+    setRegenError("");
     try {
       const res = await fetch("/api/ideas/custom/regenerate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ideaId, description: regenPrompt.trim() }),
+        body: JSON.stringify({ ideaId, description: trimmed }),
       });
-      if (res.ok) {
-        // Re-fetch idea to get updated fields
-        const ideaRes = await fetch(`/api/idea/${ideaId}`);
-        if (ideaRes.ok) {
-          const data = await ideaRes.json();
-          setIdea(data);
-          if (data.theme) setTheme(data.theme);
-          setPlan(null);
+      const resData = await res.json();
+      if (!res.ok) {
+        setRegenError(resData.error || "Regeneration failed");
+        return;
+      }
+      // Re-fetch idea — single source of truth for ALL page data
+      const ideaRes = await fetch(`/api/idea/${ideaId}`);
+      if (ideaRes.ok) {
+        const data = await ideaRes.json();
+        // Atomic update: reset all dependent state at once
+        setIdea(data);
+        setTheme(data.theme ?? null);
+        setPlan(null);
+        setUsedProvider(null);
+        setPlanError(false);
 
-          // Trigger highlight
-          if (highlightTimer.current) clearTimeout(highlightTimer.current);
-          setJustUpdated(true);
-          highlightTimer.current = setTimeout(() => setJustUpdated(false), 900);
-        }
+        // Trigger highlight
+        if (highlightTimer.current) clearTimeout(highlightTimer.current);
+        setJustUpdated(true);
+        highlightTimer.current = setTimeout(() => setJustUpdated(false), 900);
       }
     } catch {
-      /* ignore */
+      setRegenError("Failed to connect to server");
     } finally {
       setRegenerating(false);
     }
@@ -284,32 +298,52 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
 
       <main className="mx-auto max-w-3xl px-6 py-10 space-y-8">
         {/* Edit & re-generate (custom ideas only) */}
-        {idea.source === "custom" && (
-          <section className="rounded-xl border border-zinc-200 bg-white p-6">
-            <h3 className="text-sm font-semibold text-zinc-700 mb-1">
-              Refine this idea
-            </h3>
-            <p className="text-xs text-zinc-500 mb-3">
-              Edit the description below and re-generate.
-            </p>
-            <textarea
-              value={regenPrompt}
-              onChange={(e) => setRegenPrompt(e.target.value)}
-              rows={3}
-              disabled={regenerating}
-              placeholder="Describe your prototype idea…"
-              className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-300 disabled:opacity-50 resize-none"
-            />
-            <button
-              onClick={handleRegenerate}
-              disabled={!regenPrompt.trim() || regenerating}
-              className="mt-2 inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              {regenerating && <Spinner className="h-3.5 w-3.5 text-white" />}
-              {regenerating ? "Re-generating…" : "Re-generate this idea"}
-            </button>
-          </section>
-        )}
+        {idea.source === "custom" && (() => {
+          const trimLen = regenPrompt.trim().length;
+          const isValid = trimLen >= 40;
+          const counterLabel = trimLen <= 120
+            ? `${trimLen} / 120 recommended`
+            : `${trimLen} / 600 max`;
+          return (
+            <section className="rounded-xl border border-zinc-200 bg-white p-6">
+              <h3 className="text-sm font-semibold text-zinc-700 mb-1">
+                Refine this idea
+              </h3>
+              <p className="text-xs text-zinc-500 mb-3">
+                Edit the description below and re-generate.
+              </p>
+              <textarea
+                value={regenPrompt}
+                onChange={(e) => {
+                  if (e.target.value.length <= 600) setRegenPrompt(e.target.value);
+                }}
+                rows={3}
+                disabled={regenerating}
+                placeholder="Describe your prototype idea…"
+                className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-300 disabled:opacity-50 resize-none"
+              />
+              <div className="mt-1 flex items-center justify-between">
+                <p className="text-xs text-zinc-400">
+                  Include: who it&apos;s for + what it does + any key constraint.
+                </p>
+                <span className={`text-xs tabular-nums ${trimLen >= 120 ? "text-emerald-600" : trimLen >= 40 ? "text-zinc-500" : "text-zinc-400"}`}>
+                  {counterLabel}
+                </span>
+              </div>
+              {regenError && (
+                <p className="mt-2 text-sm text-red-600">{regenError}</p>
+              )}
+              <button
+                onClick={handleRegenerate}
+                disabled={!isValid || regenerating}
+                className="mt-2 inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {regenerating && <Spinner className="h-3.5 w-3.5 text-white" />}
+                {regenerating ? "Re-generating…" : "Re-generate this idea"}
+              </button>
+            </section>
+          );
+        })()}
 
         {/* Brand Vibe Pack */}
         {theme && (

@@ -79,8 +79,19 @@ function CustomIdeaSection({
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
 
+  const trimLen = text.trim().length;
+  const isValid = trimLen >= 40;
+  const counterLabel = trimLen <= 120
+    ? `${trimLen} / 120 recommended`
+    : `${trimLen} / 600 max`;
+
   const handleSubmit = async () => {
-    if (!text.trim() || generating) return;
+    const trimmed = text.trim();
+    if (!trimmed || generating) return;
+    if (trimmed.length < 40) {
+      setError("Please enter at least 40 characters.");
+      return;
+    }
     setGenerating(true);
     setError("");
 
@@ -88,7 +99,7 @@ function CustomIdeaSection({
       const res = await fetch("/api/ideas/custom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, description: text.trim() }),
+        body: JSON.stringify({ jobId, description: trimmed }),
       });
       const data = await res.json();
 
@@ -116,16 +127,26 @@ function CustomIdeaSection({
         </p>
         <textarea
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            if (e.target.value.length <= 600) setText(e.target.value);
+          }}
           placeholder="Describe your prototype idea…"
           rows={4}
           disabled={generating}
           className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none disabled:opacity-50 resize-none"
         />
+        <div className="mt-1 flex items-center justify-between">
+          <p className="text-xs text-zinc-400">
+            Include: who it&apos;s for + what it does + any key constraint.
+          </p>
+          <span className={`text-xs tabular-nums ${trimLen >= 120 ? "text-emerald-600" : trimLen >= 40 ? "text-zinc-500" : "text-zinc-400"}`}>
+            {counterLabel}
+          </span>
+        </div>
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
         <button
           onClick={handleSubmit}
-          disabled={!text.trim() || generating}
+          disabled={!isValid || generating}
           className="mt-3 inline-flex items-center gap-2 rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {generating && <Spinner className="h-4 w-4 text-white" />}
@@ -257,28 +278,46 @@ export default function ResultsPage({
         )}
 
         {/* Results grid */}
-        {status === "done" && (
-          <div>
-            <div className="mb-8">
-              <h2 className="text-xl font-semibold text-zinc-900">
-                {ideas.length} ideas for {companyContext.name || "your company"}
-              </h2>
-              <p className="text-sm text-zinc-500 mt-1">
-                Ordered from quickest to most ambitious. Click any card for details and Cursor build steps.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {ideas.map((idea) => (
-                <IdeaCard key={idea.id} idea={idea} />
-              ))}
-            </div>
+        {status === "done" && (() => {
+          const recommended = ideas.filter((i) => i.source !== "custom");
+          const custom = ideas.filter((i) => i.source === "custom");
+          return (
+            <div>
+              {/* Custom ideas (separate section above recommendations) */}
+              {custom.length > 0 && (
+                <div className="mb-8">
+                  <h3 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+                    Your custom {custom.length === 1 ? "idea" : "ideas"}
+                  </h3>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {custom.map((idea) => (
+                      <IdeaCard key={idea.id} idea={idea} />
+                    ))}
+                  </div>
+                </div>
+              )}
 
-            {/* Custom idea builder */}
-            {jobId && (
-              <CustomIdeaSection jobId={jobId} router={router} />
-            )}
-          </div>
-        )}
+              <div className="mb-8">
+                <h2 className="text-xl font-semibold text-zinc-900">
+                  {recommended.length} ideas for {companyContext.name || "your company"}
+                </h2>
+                <p className="text-sm text-zinc-500 mt-1">
+                  Ordered from quickest to most ambitious. Click any card for details and Cursor build steps.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {recommended.map((idea) => (
+                  <IdeaCard key={idea.id} idea={idea} />
+                ))}
+              </div>
+
+              {/* Custom idea builder */}
+              {jobId && (
+                <CustomIdeaSection jobId={jobId} router={router} />
+              )}
+            </div>
+          );
+        })()}
       </main>
     </div>
   );
