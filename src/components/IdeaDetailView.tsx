@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import type { Idea, BuildPlan, BuildStep, AnalysisStep, Theme } from "@/lib/types";
+import type { Idea, BuildPlan, BuildStep, Theme } from "@/lib/types";
 import { EFFORT_LEVELS } from "@/lib/effort";
 
 /* ── Helpers ── */
@@ -34,24 +34,23 @@ function EffortBadge({ effort }: { effort: string }) {
   );
 }
 
-function StepIcon({ status }: { status: AnalysisStep["status"] }) {
-  if (status === "running") return <Spinner className="ab-spinner-themed" />;
-  if (status === "done")
-    return (
-      <svg className="h-5 w-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-      </svg>
-    );
-  return <span className="h-5 w-5 rounded-full border-2 border-zinc-300 block" />;
-}
+/* ── Rotating status messages (single flat list, sequential) ── */
 
-/* ── Cooking steps for build-plan generation ── */
-const COOK_STEPS: AnalysisStep[] = [
-  { id: "context", label: "Assembling context", status: "pending" },
-  { id: "prompt1", label: "Drafting Prompt 1", status: "pending" },
-  { id: "prompt2", label: "Drafting Prompt 2", status: "pending" },
-  { id: "prompt3", label: "Drafting Prompt 3", status: "pending" },
-  { id: "wrapup", label: "Wrapping Up", status: "pending" },
+const STATUS_LINES = [
+  "Good things come to those who wait",
+  "And you might have to wait 30 seconds",
+  "Gemini Pro takes a bit more time",
+  "But it\u2019s worth it for the quality results",
+  "So you want to build an app\u2026",
+  "And the good news is\u2026",
+  "You are in the right place!",
+  "Remember not to quit",
+  "There are no dead ends with AI",
+  "Just hang in there and be patient",
+  "Speaking of patience\u2026",
+  "Almost done",
+  "I said\u2026 almost done!",
+  "The power of AI compels me!",
 ];
 
 const MIN_COOK_MS = 6000; // minimum visible cooking time
@@ -66,7 +65,8 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState<BuildPlan | null>(null);
   const [generating, setGenerating] = useState(false);
-  const [cookSteps, setCookSteps] = useState<AnalysisStep[]>(COOK_STEPS);
+  const [statusLine, setStatusLine] = useState("");
+  const msgIdxRef = useRef(0);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [copiedTerminal, setCopiedTerminal] = useState(false);
   const [copiedTheme, setCopiedTheme] = useState(false);
@@ -101,10 +101,9 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
     })();
   }, [ideaId]);
 
-  /* ── Auto-scroll to cooking section when generation starts ── */
+  /* ── Auto-scroll to spinner section when generation starts ── */
   useEffect(() => {
     if (generating) {
-      // Small delay so the DOM has time to mount the checklist
       const t = setTimeout(() => {
         cookSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 40);
@@ -112,35 +111,43 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
     }
   }, [generating]);
 
+  /* ── Rotating status line while generating (deterministic order) ── */
+  useEffect(() => {
+    if (!generating) return;
+
+    // Reset index for a new generation run
+    msgIdxRef.current = 0;
+    setStatusLine("");
+
+    let iv: ReturnType<typeof setInterval> | null = null;
+
+    // 600ms calm delay, then show first line and start advancing
+    const delay = setTimeout(() => {
+      setStatusLine(STATUS_LINES[0]);
+
+      iv = setInterval(() => {
+        const next = msgIdxRef.current + 1;
+        if (next < STATUS_LINES.length) {
+          msgIdxRef.current = next;
+          setStatusLine(STATUS_LINES[next]);
+        }
+        // Once we reach the last line, hold it (no wrap)
+      }, 3500);
+    }, 600);
+
+    return () => {
+      clearTimeout(delay);
+      if (iv) clearInterval(iv);
+    };
+  }, [generating]);
+
   /* ── Generate build steps ── */
-  const handleGenerate = async () => {
+  const handleGenerate = useCallback(async () => {
     setGenerating(true);
     setUsedProvider(null);
     setPlanError(false);
     setPlan(null);
     const cookStart = Date.now();
-
-    // Reset all steps to pending
-    setCookSteps(COOK_STEPS.map((s) => ({ ...s, status: "pending" as const })));
-
-    // Progressive checklist: spinner advances through steps on a schedule.
-    // Steps before the active one get green checks; steps after stay pending.
-    // "Wrapping Up" (last) keeps spinning until the API actually returns.
-    const stepTimings = [0, 1200, 2800, 4200, 5400];
-    const timers: ReturnType<typeof setTimeout>[] = [];
-
-    for (let i = 0; i < COOK_STEPS.length; i++) {
-      timers.push(
-        setTimeout(() => {
-          setCookSteps((prev) =>
-            prev.map((s, j) => ({
-              ...s,
-              status: j < i ? "done" : j === i ? "running" : "pending",
-            }))
-          );
-        }, stepTimings[i])
-      );
-    }
 
     try {
       const res = await fetch("/api/steps/generate", {
@@ -151,21 +158,13 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
 
       const data = res.ok ? await res.json() : null;
 
-      // Enforce minimum cooking time
+      // Enforce minimum visible time
       const elapsed = Date.now() - cookStart;
       if (elapsed < MIN_COOK_MS) {
         await new Promise((r) => setTimeout(r, MIN_COOK_MS - elapsed));
       }
 
-      // Clear animation timers
-      timers.forEach(clearTimeout);
-
-      // Validate plan before marking complete
       if (isValidPlan(data)) {
-        // Flip all steps (including Wrapping Up) to green checks
-        setCookSteps(COOK_STEPS.map((s) => ({ ...s, status: "done" })));
-        await new Promise((r) => setTimeout(r, 400));
-
         setPlan(data);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const provider = (data as any).used as string | undefined;
@@ -175,13 +174,11 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
         setPlanError(true);
       }
     } catch {
-      // On error, keep whatever checks are already shown — don't reset them
-      timers.forEach(clearTimeout);
       setPlanError(true);
     } finally {
       setGenerating(false);
     }
-  };
+  }, [ideaId]);
 
   const copyPrompt = (prompt: string, idx: number) => {
     navigator.clipboard.writeText(prompt).catch(() => {});
@@ -461,30 +458,15 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
           {generating && (
             <div
               ref={cookSectionRef}
-              className="rounded-xl border border-zinc-200 bg-white p-8"
+              className="rounded-xl border border-zinc-200 bg-white py-14 px-6 text-center"
               style={{ scrollMarginTop: "2rem" }}
             >
-              <h3 className="text-base font-semibold text-zinc-900 mb-4">
-                Generating build steps...
-              </h3>
-              <ul className="space-y-3">
-                {cookSteps.map((step) => (
-                  <li key={step.id} className="flex items-center gap-3">
-                    <StepIcon status={step.status} />
-                    <span
-                      className={`text-sm ${
-                        step.status === "running"
-                          ? "font-medium text-zinc-900"
-                          : step.status === "done"
-                          ? "text-zinc-700"
-                          : "text-zinc-500"
-                      }`}
-                    >
-                      {step.label}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <div className="flex justify-center mb-5">
+                <Spinner className="h-7 w-7 text-zinc-400" />
+              </div>
+              <p className="text-base sm:text-lg font-medium text-zinc-700 min-h-[1.75rem] transition-opacity duration-300 ease-out truncate sm:whitespace-normal">
+                {statusLine}
+              </p>
             </div>
           )}
 
@@ -581,7 +563,6 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
 
               {/* ── Prompts 1-3: Cursor chat prompts ── */}
               {Array.isArray(plan.steps) && plan.steps.map((step: BuildStep, i: number) => {
-                const isOptional = i >= 2;
                 const promptText = step?.cursorPrompt ?? "";
                 const roleLabel = step?.role ?? "FE";
                 const titleLabel = step?.title ?? `Step ${i + 1}`;
@@ -590,11 +571,7 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                 return (
                   <div
                     key={i}
-                    className={`rounded-xl border bg-white p-6 ${
-                      isOptional
-                        ? "border-dashed border-zinc-300 opacity-80"
-                        : "border-zinc-200"
-                    }`}
+                    className="rounded-xl border border-zinc-200 bg-white p-6"
                   >
                     {/* Header row */}
                     <div className="flex items-center gap-2 mb-3">
@@ -607,11 +584,6 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                       <h3 className="text-sm font-semibold text-zinc-900 flex-1">
                         {titleLabel}
                       </h3>
-                      {isOptional && (
-                        <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-medium">
-                          optional
-                        </span>
-                      )}
                     </div>
 
                     {/* Goal */}
@@ -640,15 +612,11 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                       className={`mt-3 w-full rounded-lg py-3 text-sm font-semibold transition-colors ${
                         copiedIdx === i
                           ? "bg-emerald-600 text-white"
-                          : isOptional
-                          ? "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
                           : "ab-btn-primary"
                       }`}
                     >
                       {copiedIdx === i
                         ? "✓ Copied to clipboard"
-                        : isOptional
-                        ? "Copy Fix + Polish prompt"
                         : `Copy Prompt ${i + 1}`}
                     </button>
 
