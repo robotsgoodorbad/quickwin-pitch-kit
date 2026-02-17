@@ -399,7 +399,7 @@ export default function ResultsPage({
 }) {
   const router = useRouter();
   const [jobId, setJobId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>("loading");
+  const [status, setStatus] = useState<string>("init");
   const [steps, setSteps] = useState<AnalysisStep[]>([]);
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [companyContext, setCompanyContext] = useState<CompanyContext>({ name: "" });
@@ -479,6 +479,13 @@ export default function ResultsPage({
       <AppHeader />
 
       <main className="mx-auto max-w-5xl px-6 py-10">
+        {/* Init state — brief spinner before first poll returns */}
+        {status === "init" && (
+          <div className="flex items-center justify-center py-32">
+            <Spinner className="text-zinc-400 h-8 w-8" />
+          </div>
+        )}
+
         {/* Loading / cooking state */}
         {(status === "loading" || status === "cooking") && (() => {
           const displaySteps = steps.length > 0 ? steps : DEFAULT_PIPELINE_STEPS;

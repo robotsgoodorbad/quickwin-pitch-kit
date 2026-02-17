@@ -747,7 +747,10 @@ export default function HomePage() {
         if (data.evidence) setEvidence(data.evidence);
 
         if (data.status === "done") {
-          router.push(`/results/${jobId}`);
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (timerRef.current) clearInterval(timerRef.current);
+          router.replace(`/results/${jobId}`);
+          return;
         } else if (data.status === "failed") {
           setError("Analysis failed. Please try again.");
           setState("input");
