@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { Idea, AnalysisStep, CompanyContext, ContextBundle, JobEvidence } from "@/lib/types";
 import { EFFORT_LEVELS } from "@/lib/effort";
 import AppHeader from "@/components/AppHeader";
+import { cleanStepNote } from "@/lib/cleanStepNote";
 
 /* ── Default pipeline steps (mirrors buildInitialSteps in analyzer.ts) ── */
 const DEFAULT_PIPELINE_STEPS: AnalysisStep[] = [
@@ -94,8 +95,8 @@ function CustomIdeaSection({
 
   const trimLen = text.trim().length;
   const isValid = trimLen >= 40;
-  const counterLabel = trimLen <= 120
-    ? `${trimLen} / 120 recommended`
+  const counterLabel = trimLen <= 200
+    ? `${trimLen} / 200 recommended`
     : `${trimLen} / 600 max`;
 
   const handleSubmit = async () => {
@@ -152,7 +153,7 @@ function CustomIdeaSection({
           <p className="text-xs text-zinc-400">
             Include: who it&apos;s for + what it does + any key constraint.
           </p>
-          <span className={`text-xs tabular-nums ${trimLen >= 120 ? "text-emerald-600" : trimLen >= 40 ? "text-zinc-500" : "text-zinc-400"}`}>
+          <span className={`text-xs tabular-nums ${trimLen >= 200 ? "text-emerald-600" : trimLen >= 40 ? "text-zinc-500" : "text-zinc-400"}`}>
             {counterLabel}
           </span>
         </div>
@@ -516,9 +517,12 @@ export default function ResultsPage({
                         : step.status === "skipped" || step.status === "failed" ? "text-zinc-400 line-through"
                         : "text-zinc-500"
                       }`}>{step.label}</span>
-                      {step.note && (step.status === "done" || step.status === "skipped") && (
-                        <span className="ml-2 text-xs text-zinc-400">— {step.note}</span>
-                      )}
+                      {step.note && (step.status === "done" || step.status === "skipped") && (() => {
+                        const cleaned = cleanStepNote(step.note);
+                        return cleaned ? (
+                          <span className="ml-2 text-xs text-zinc-400">— {cleaned}</span>
+                        ) : null;
+                      })()}
                     </div>
                   </li>
                 ))}

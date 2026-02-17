@@ -340,8 +340,8 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
         {idea.source === "custom" && (() => {
           const trimLen = regenPrompt.trim().length;
           const isValid = trimLen >= 40;
-          const counterLabel = trimLen <= 120
-            ? `${trimLen} / 120 recommended`
+          const counterLabel = trimLen <= 200
+            ? `${trimLen} / 200 recommended`
             : `${trimLen} / 600 max`;
           return (
             <section className="rounded-xl border border-zinc-200 bg-white p-6">
@@ -357,7 +357,7 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
               />
               <div className="mt-1 flex items-center justify-between">
                 <p className="text-xs text-zinc-400">Include: who it&apos;s for + what it does + any key constraint.</p>
-                <span className={`text-xs tabular-nums ${trimLen >= 120 ? "text-emerald-600" : trimLen >= 40 ? "text-zinc-500" : "text-zinc-400"}`}>
+                <span className={`text-xs tabular-nums ${trimLen >= 200 ? "text-emerald-600" : trimLen >= 40 ? "text-zinc-500" : "text-zinc-400"}`}>
                   {counterLabel}
                 </span>
               </div>
@@ -580,10 +580,16 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                 </div>
               </section>
 
-              {/* ── Step 1: Get your laptop ready ── */}
+              {/* ── Pre-step: Get your laptop ready ── */}
               <section className="rounded-xl border-2 border-emerald-200 bg-white p-6">
                 <div className="flex items-center gap-2 mb-4">
-                  <span className="flex items-center justify-center h-7 w-7 rounded-full bg-emerald-100 text-xs font-bold text-emerald-700">1</span>
+                  <span className="flex items-center justify-center h-7 w-7 rounded-full bg-emerald-100 text-emerald-700">
+                    {/* Laptop icon */}
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="4" width="18" height="12" rx="2" />
+                      <path d="M2 20h20" />
+                    </svg>
+                  </span>
                   <h3 className="text-base font-semibold text-zinc-900">Get your laptop ready</h3>
                 </div>
 
@@ -632,7 +638,7 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                   className={`mt-3 w-full rounded-lg py-3 text-sm font-semibold transition-colors ${
                     copiedTerminal
                       ? "bg-emerald-600 text-white"
-                      : "bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                      : "ab-btn-primary"
                   }`}
                 >
                   {copiedTerminal ? "\u2713 Copied to clipboard" : "Copy Terminal Commands"}
@@ -654,14 +660,14 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                 </div>
               </section>
 
-              {/* ── Steps 2–N: Cursor prompts ── */}
+              {/* ── Steps 1–N: Cursor prompts ── */}
               {Array.isArray(plan.steps) && plan.steps.map((step: BuildStep, i: number) => {
                 const promptText = step?.cursorPrompt ?? "";
                 const roleLabel = step?.role ?? "FE";
-                const titleLabel = step?.title ?? `Step ${i + 2}`;
+                const titleLabel = step?.title ?? `Step ${i + 1}`;
                 const goalLabel = step?.instruction ?? "";
                 const doneLabel = step?.doneLooksLike ?? "";
-                const stepNumber = i + 2;
+                const stepNumber = i + 1;
                 return (
                   <section
                     key={i}
@@ -713,39 +719,166 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                 );
               })}
 
-              {/* ── Share your prototype (optional) ── */}
-              <section className="rounded-xl border border-zinc-200 bg-white p-6">
-                <h3 className="text-base font-semibold text-zinc-900 mb-3">Share your prototype (optional)</h3>
-                <p className="text-sm text-zinc-600 mb-4 leading-relaxed">
-                  Your prototype works locally — that&apos;s already great! If you want to share a link with someone, here are two beginner-friendly options. Both are free for small projects.
-                </p>
+              {/* ── Share your prototype (optional) — collapsed accordion ── */}
+              <section className="rounded-xl border border-zinc-200 bg-white">
+                <details className="group">
+                  <summary className="cursor-pointer select-none list-none p-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-base font-semibold text-zinc-900">Share your prototype (optional)</h3>
+                        <p className="text-sm text-zinc-500 mt-1">
+                          Deploying is optional. When you&apos;re ready, choose Vercel or Firebase.
+                        </p>
+                      </div>
+                      <svg className="h-5 w-5 text-zinc-400 transition-transform group-open:rotate-180 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </summary>
 
-                {/* Vercel */}
-                <div className="mb-6">
-                  <div className="flex items-center gap-2 mb-2">
-                    <h4 className="text-sm font-semibold text-zinc-800">Vercel</h4>
-                    <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-medium text-emerald-700 uppercase tracking-wider">recommended</span>
-                  </div>
-                  <ol className="space-y-2 text-sm text-zinc-600">
-                    <li className="flex gap-2"><span className="text-zinc-400 font-mono text-xs mt-0.5">1.</span> Install the CLI: <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">npm i -g vercel</code></li>
-                    <li className="flex gap-2"><span className="text-zinc-400 font-mono text-xs mt-0.5">2.</span> Run <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">vercel</code> in your project folder</li>
-                    <li className="flex gap-2"><span className="text-zinc-400 font-mono text-xs mt-0.5">3.</span> Follow the prompts — accept defaults, and you&apos;ll get a live URL</li>
-                  </ol>
-                </div>
+                  <div className="px-6 pb-6 space-y-6">
+                    {/* Intro */}
+                    <div className="rounded-lg bg-indigo-50 border border-indigo-100 p-4">
+                      <p className="text-sm text-indigo-800 leading-relaxed">
+                        <strong>What does &quot;deploy&quot; mean?</strong> Right now your app only runs on your computer.
+                        Deploying puts it on the internet so anyone with the link can use it — like sharing a Google Doc, but for your app.
+                        Both options below are free for small projects.
+                      </p>
+                    </div>
 
-                {/* Firebase */}
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <h4 className="text-sm font-semibold text-zinc-800">Firebase Hosting</h4>
-                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 uppercase tracking-wider">alternative</span>
+                    {/* ── Vercel (recommended) ── */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <h4 className="text-sm font-semibold text-zinc-800">Vercel (recommended)</h4>
+                        <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-medium text-emerald-700 uppercase tracking-wider">easiest</span>
+                      </div>
+                      <p className="text-sm text-zinc-600 mb-2">
+                        <strong>What you&apos;ll end up with:</strong> A live URL like <code className="text-xs bg-zinc-100 px-1 rounded">your-app.vercel.app</code> that anyone can visit.
+                      </p>
+
+                      {/* Before you start */}
+                      <div className="rounded-lg bg-zinc-50 border border-zinc-200 p-3 mb-3 text-sm text-zinc-600">
+                        <p className="font-medium text-zinc-700 mb-1">Before you start:</p>
+                        <ul className="space-y-1 text-xs text-zinc-600">
+                          <li className="flex gap-1.5">
+                            <span className="text-zinc-400">•</span>
+                            Create a free account at <a href="https://vercel.com" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">vercel.com</a>
+                          </li>
+                          <li className="flex gap-1.5">
+                            <span className="text-zinc-400">•</span>
+                            Make sure your app runs locally with <code className="bg-zinc-100 px-1 rounded text-[11px]">npm run dev</code>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <ol className="space-y-2 text-sm text-zinc-600 mb-4">
+                        <li className="flex gap-2">
+                          <span className="text-zinc-400 font-mono text-xs mt-0.5 flex-shrink-0">1.</span>
+                          <span>Open Cursor&apos;s terminal and run: <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">npm i -g vercel</code></span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-zinc-400 font-mono text-xs mt-0.5 flex-shrink-0">2.</span>
+                          <span>Type <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">vercel</code> and press Enter. It&apos;ll open a browser to log you in.</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-zinc-400 font-mono text-xs mt-0.5 flex-shrink-0">3.</span>
+                          <span>Answer the prompts (accept all defaults). When it finishes, you&apos;ll see your live URL.</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-zinc-400 font-mono text-xs mt-0.5 flex-shrink-0">4.</span>
+                          <span>Add your environment variables in the <a href="https://vercel.com/dashboard" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">Vercel dashboard</a> → Project → Settings → Environment Variables. Never commit <code className="bg-zinc-100 px-1 rounded text-[11px]">.env</code> files.</span>
+                        </li>
+                      </ol>
+
+                      {/* Optional Cursor prompt */}
+                      <div className="rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 p-4">
+                        <p className="text-xs font-semibold text-indigo-700 mb-2">Optional: Ask Cursor to deploy on Vercel</p>
+                        <div className="relative rounded-lg bg-zinc-950 p-3">
+                          <pre className="text-xs text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed">{`Install the Vercel CLI globally (npm i -g vercel) if not already installed.\nRun "vercel" in my project root to deploy.\nFollow the interactive prompts — accept all defaults.\nWhen done, show me the live URL.\nDo NOT commit any .env or secret files.`}</pre>
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(`Install the Vercel CLI globally (npm i -g vercel) if not already installed.\nRun "vercel" in my project root to deploy.\nFollow the interactive prompts — accept all defaults.\nWhen done, show me the live URL.\nDo NOT commit any .env or secret files.`).catch(() => {});
+                          }}
+                          className="mt-2 rounded-lg px-3 py-1.5 text-xs font-medium ab-btn-primary"
+                        >
+                          Copy Cursor prompt
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* ── Firebase Hosting (alternative) ── */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <h4 className="text-sm font-semibold text-zinc-800">Firebase Hosting (alternative)</h4>
+                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 uppercase tracking-wider">alternative</span>
+                      </div>
+                      <p className="text-sm text-zinc-600 mb-2">
+                        <strong>What you&apos;ll end up with:</strong> A live URL like <code className="text-xs bg-zinc-100 px-1 rounded">your-app.web.app</code>.
+                      </p>
+
+                      {/* Before you start */}
+                      <div className="rounded-lg bg-zinc-50 border border-zinc-200 p-3 mb-3 text-sm text-zinc-600">
+                        <p className="font-medium text-zinc-700 mb-1">Before you start:</p>
+                        <ul className="space-y-1 text-xs text-zinc-600">
+                          <li className="flex gap-1.5">
+                            <span className="text-zinc-400">•</span>
+                            Create a free <a href="https://console.firebase.google.com" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">Firebase project</a>
+                          </li>
+                          <li className="flex gap-1.5">
+                            <span className="text-zinc-400">•</span>
+                            Make sure your app builds with <code className="bg-zinc-100 px-1 rounded text-[11px]">npm run build</code>
+                          </li>
+                        </ul>
+                      </div>
+
+                      <ol className="space-y-2 text-sm text-zinc-600 mb-4">
+                        <li className="flex gap-2">
+                          <span className="text-zinc-400 font-mono text-xs mt-0.5 flex-shrink-0">1.</span>
+                          <span>Install Firebase CLI: <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">npm i -g firebase-tools</code></span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-zinc-400 font-mono text-xs mt-0.5 flex-shrink-0">2.</span>
+                          <span>Log in: <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">firebase login</code> (opens a browser).</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-zinc-400 font-mono text-xs mt-0.5 flex-shrink-0">3.</span>
+                          <span>Initialize hosting: <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">firebase init hosting</code>. Select your project and accept defaults.</span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-zinc-400 font-mono text-xs mt-0.5 flex-shrink-0">4.</span>
+                          <span>Build your app: <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">npm run build</code></span>
+                        </li>
+                        <li className="flex gap-2">
+                          <span className="text-zinc-400 font-mono text-xs mt-0.5 flex-shrink-0">5.</span>
+                          <span>Deploy: <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">firebase deploy --only hosting</code>. Your live URL will appear in the output.</span>
+                        </li>
+                      </ol>
+
+                      <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 mb-4">
+                        <p className="text-xs text-amber-800">
+                          <strong>Tip:</strong> Set environment variables in the Firebase console (Project settings → Service accounts or Cloud Functions → Environment). Keep <code className="font-mono">.env.local</code> local-only.
+                        </p>
+                      </div>
+
+                      {/* Optional Cursor prompt */}
+                      <div className="rounded-lg border border-dashed border-indigo-200 bg-indigo-50/50 p-4">
+                        <p className="text-xs font-semibold text-indigo-700 mb-2">Optional: Ask Cursor to deploy on Firebase</p>
+                        <div className="relative rounded-lg bg-zinc-950 p-3">
+                          <pre className="text-xs text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed">{`Install firebase-tools globally (npm i -g firebase-tools) if not already installed.\nRun "firebase login" so I'm authenticated.\nRun "firebase init hosting" — select my Firebase project and accept defaults.\nBuild my app with "npm run build".\nDeploy with "firebase deploy --only hosting".\nShow me the live URL when done.\nDo NOT commit any .env or secret files.`}</pre>
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(`Install firebase-tools globally (npm i -g firebase-tools) if not already installed.\nRun "firebase login" so I'm authenticated.\nRun "firebase init hosting" — select my Firebase project and accept defaults.\nBuild my app with "npm run build".\nDeploy with "firebase deploy --only hosting".\nShow me the live URL when done.\nDo NOT commit any .env or secret files.`).catch(() => {});
+                          }}
+                          className="mt-2 rounded-lg px-3 py-1.5 text-xs font-medium ab-btn-primary"
+                        >
+                          Copy Cursor prompt
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <ol className="space-y-2 text-sm text-zinc-600">
-                    <li className="flex gap-2"><span className="text-zinc-400 font-mono text-xs mt-0.5">1.</span> Install: <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">npm i -g firebase-tools</code></li>
-                    <li className="flex gap-2"><span className="text-zinc-400 font-mono text-xs mt-0.5">2.</span> Run <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">firebase login</code> then <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">firebase init hosting</code></li>
-                    <li className="flex gap-2"><span className="text-zinc-400 font-mono text-xs mt-0.5">3.</span> Add <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">&quot;output&quot;: &quot;export&quot;</code> to next.config.ts, run <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">npm run build</code></li>
-                    <li className="flex gap-2"><span className="text-zinc-400 font-mono text-xs mt-0.5">4.</span> Deploy: <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-mono">firebase deploy --only hosting</code></li>
-                  </ol>
-                </div>
+                </details>
               </section>
             </div>
           )}

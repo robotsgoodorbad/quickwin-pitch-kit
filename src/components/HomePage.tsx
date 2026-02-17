@@ -14,6 +14,8 @@ import type {
 } from "@/lib/types";
 import { EFFORT_LEVELS } from "@/lib/effort";
 import AppHeader from "@/components/AppHeader";
+import HomeHeroPattern from "@/components/HomeHeroPattern";
+import { cleanStepNote } from "@/lib/cleanStepNote";
 
 /* ═══════════════════════════════════════════
    State machine
@@ -796,45 +798,52 @@ export default function HomePage() {
 
   /* ── Render ── */
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <AppHeader />
+    <div className="min-h-screen bg-zinc-50 relative">
+      {/* Wallpaper: fixed layer, z-0 — must render before content so content stacks on top */}
+      {state === "input" && <HomeHeroPattern />}
 
-      <main className="mx-auto max-w-5xl px-6 py-10">
-        {/* ── Input state ── */}
+      <div className="relative z-10">
+        <AppHeader onReset={reset} />
+      </div>
+
+      <main className="relative z-10 mx-auto max-w-5xl px-6 py-10">
+        {/* ── Input state (hero with branded pattern) ── */}
         {state === "input" && (
-          <div className="mx-auto max-w-xl">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
-              <label
-                htmlFor="company-input"
-                className="block text-sm font-medium text-zinc-700 mb-2"
-              >
-                Enter a company name or website
-              </label>
-              <div className="flex gap-3">
-                <input
-                  id="company-input"
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && input.trim()) handleSubmit();
-                  }}
-                  placeholder="e.g. Stripe, notion.so, https://linear.app"
-                  className="flex-1 rounded-lg border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
-                  autoFocus
-                />
-                <button
-                  onClick={() => handleSubmit()}
-                  disabled={!input.trim() || submitting}
-                  className="ab-btn-primary inline-flex items-center gap-2 rounded-lg px-6 py-3 text-sm font-medium disabled:cursor-not-allowed"
+          <div className="relative -mx-6 -mt-10 px-6 py-24 sm:py-28 overflow-hidden">
+            <div className="relative mx-auto max-w-xl">
+              <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
+                <label
+                  htmlFor="company-input"
+                  className="block text-sm font-medium text-zinc-700 mb-2"
                 >
-                  {submitting && <Spinner className="text-white" />}
-                  Analyze
-                </button>
+                  Enter a company name or website
+                </label>
+                <div className="flex gap-3">
+                  <input
+                    id="company-input"
+                    type="text"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && input.trim()) handleSubmit();
+                    }}
+                    placeholder="e.g. Delta, Kohler, Sony, https://www.nba.com"
+                    className="flex-1 rounded-lg border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => handleSubmit()}
+                    disabled={!input.trim() || submitting}
+                    className="ab-btn-primary inline-flex items-center gap-2 rounded-lg px-6 py-3 text-sm font-medium disabled:cursor-not-allowed"
+                  >
+                    {submitting && <Spinner className="text-white" />}
+                    Analyze
+                  </button>
+                </div>
+                {error && (
+                  <p className="mt-3 text-sm text-red-600">{error}</p>
+                )}
               </div>
-              {error && (
-                <p className="mt-3 text-sm text-red-600">{error}</p>
-              )}
             </div>
           </div>
         )}
@@ -931,11 +940,14 @@ export default function HomePage() {
                         >
                           {step.label}
                         </span>
-                        {step.note && (step.status === "done" || step.status === "skipped") && (
-                          <span className="ml-2 text-xs text-zinc-400">
-                            — {step.note}
-                          </span>
-                        )}
+                        {step.note && (step.status === "done" || step.status === "skipped") && (() => {
+                          const cleaned = cleanStepNote(step.note);
+                          return cleaned ? (
+                            <span className="ml-2 text-xs text-zinc-400">
+                              — {cleaned}
+                            </span>
+                          ) : null;
+                        })()}
                       </div>
                     </li>
                   ))}
