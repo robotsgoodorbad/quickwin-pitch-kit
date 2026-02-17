@@ -1,83 +1,13 @@
 /* ── Gemini-powered idea generation (server-only) ──
    Uses the official @google/generative-ai SDK.
    Reads GEMINI_API_KEY from process.env — never exposed to the browser.
+   Accepts a ContextBundle as the SOLE source of context.
    Throws on any failure so the caller can fall back gracefully. */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { Idea, CompanyContext, JobEvidence, InspirationPack } from "./types";
-
-const MODEL = "gemini-2.0-flash";
-
-/* ── Rich context builder ── */
-
-function buildRichContext(ctx: CompanyContext, evidence?: JobEvidence): string {
-  const parts: string[] = [`Company: ${ctx.name}`];
-  if (ctx.url) parts.push(`Website: ${ctx.url}`);
-  if (ctx.description) parts.push(`Description: ${ctx.description}`);
-
-  // Wikidata enrichment
-  if (ctx.wikidataId) parts.push(`Wikidata ID: ${ctx.wikidataId}`);
-  if (ctx.industryHints?.length)
-    parts.push(`Industry/type: ${ctx.industryHints.join(", ")}`);
-
-  if (ctx.headings?.length)
-    parts.push(`Key headings from site:\n  ${ctx.headings.slice(0, 15).join("\n  ")}`);
-  if (ctx.navLabels?.length)
-    parts.push(`Navigation labels: ${ctx.navLabels.join(", ")}`);
-
-  // Press / newsroom
-  if (ctx.pressHeadlines?.length)
-    parts.push(`Press headlines:\n  ${ctx.pressHeadlines.slice(0, 8).join("\n  ")}`);
-  if (evidence?.pressLinks?.length)
-    parts.push(`Press URLs discovered (${evidence.pressLinks.length}): ${evidence.pressLinks.slice(0, 5).join(", ")}`);
-
-  // External news (GDELT)
-  const newsItems = evidence?.news?.items;
-  if (newsItems?.length) {
-    const newsBlock = newsItems
-      .slice(0, 5)
-      .map((n) => `• ${n.title} (${n.source}${n.date ? ", " + n.date : ""})`)
-      .join("\n  ");
-    parts.push(`Recent external news (via ${evidence?.news?.provider ?? "GDELT"}):\n  ${newsBlock}`);
-  } else if (ctx.newsItems?.length) {
-    parts.push(`News items: ${ctx.newsItems.slice(0, 5).join("; ")}`);
-  }
-
-  // Key pages fetched
-  if (evidence?.keyPages?.length)
-    parts.push(`Key pages we fetched: ${evidence.keyPages.join(", ")}`);
-
-  return parts.join("\n\n");
-}
-
-/* ── Inspiration Pack section for prompt ── */
-
-function buildInspirationSection(pack: InspirationPack): string {
-  const lines: string[] = [
-    `\n--- INSPIRATION PACK (${pack.products.length} products, mode: ${pack.modeUsed}, keywords: ${pack.keywords.join(", ")}) ---`,
-    ``,
-  ];
-
-  // Products with inferred features
-  lines.push(`Products for inspiration:`);
-  for (const p of pack.products.slice(0, 8)) {
-    const features = p.inferredFeatures.length
-      ? ` [${p.inferredFeatures.join("; ")}]`
-      : "";
-    lines.push(`  • ${p.name}: ${p.tagline}${features}`);
-  }
-
-  // Common patterns
-  if (pack.commonPatterns.length > 0) {
-    lines.push(``);
-    lines.push(`Common patterns observed:`);
-    for (const pattern of pack.commonPatterns) {
-      lines.push(`  • ${pattern}`);
-    }
-  }
-
-  return lines.join("\n");
-}
+import type { Idea, ContextBundle } from "./types";
+import { contextBundleToPrompt } from "./contextBundle";
+import { getGeminiModel, getGeminiApiVersion, logGeminiCall } from "./geminiConfig";
 
 /* ── System prompt ── */
 
@@ -90,8 +20,9 @@ IMPORTANT RULES:
 - Order from easiest (15min) to most ambitious (1-3days)
 - Each idea must be specific to the company's domain, products, and current news
 - Use the gathered context (site content, press, news) to make ideas hyper-relevant
-- Use the Inspiration Pack's common patterns to ground each idea in proven product patterns
-- Each idea MUST include an "inspiredAngle" field: ONE sentence explaining the creative angle, tied to a pattern from the Inspiration Pack (do NOT name "Product Hunt" — just describe the pattern)
+- If an Inspiration Pack is provided, use its common patterns to ground ideas in proven product patterns
+- Each idea MUST include an "inspiredAngle" field: ONE sentence explaining the creative angle (do NOT name "Product Hunt")
+- If no Inspiration Pack was provided, base inspiredAngle on the company's own context
 - Each idea should be a distinct, buildable, demo-worthy prototype
 
 Output ONLY valid JSON — an array of 15 objects with these exact fields:
@@ -99,7 +30,7 @@ Output ONLY valid JSON — an array of 15 objects with these exact fields:
 - summary (string, 1-2 sentences describing the prototype)
 - effort (string, one of: "15min", "1hr", "4hr", "8hr", "1-3days")
 - outline (object with: pages: string[], components: string[], data: string[], niceToHave: string[])
-- inspiredAngle (string, 1 sentence: the creative angle inspired by a common pattern)
+- inspiredAngle (string, 1 sentence: the creative angle inspired by a common pattern or company context)
 
 Do NOT include any markdown formatting, code fences, or extra text — just the raw JSON array.`;
 
@@ -107,40 +38,48 @@ Do NOT include any markdown formatting, code fences, or extra text — just the 
 
 export async function generateIdeasWithGemini(
   jobId: string,
-  context: CompanyContext,
-  evidence?: JobEvidence
+  bundle: ContextBundle
 ): Promise<Idea[]> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("GEMINI_API_KEY not configured");
 
+  const modelId = getGeminiModel("ideas");
+  const apiVersion = getGeminiApiVersion();
+  const t0 = performance.now();
+
   const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({
-    model: MODEL,
-    generationConfig: {
-      temperature: 0.85,
-      maxOutputTokens: 8192,
-      responseMimeType: "application/json",
+  const model = genAI.getGenerativeModel(
+    {
+      model: modelId,
+      generationConfig: {
+        temperature: 0.85,
+        maxOutputTokens: 8192,
+        responseMimeType: "application/json",
+      },
     },
-  });
+    { apiVersion }
+  );
 
-  const richCtx = buildRichContext(context, evidence);
+  const contextText = contextBundleToPrompt(bundle);
+  const prompt = `${IDEAS_SYSTEM}\n\n--- COMPANY CONTEXT ---\n${contextText}`;
 
-  // Build inspiration section if available
-  const inspirationSection = evidence?.inspirationPack
-    ? buildInspirationSection(evidence.inspirationPack)
-    : "";
+  let text: string;
+  try {
+    const result = await model.generateContent(prompt);
+    text = result.response.text();
+  } catch (err) {
+    const durationMs = Math.round(performance.now() - t0);
+    logGeminiCall("ideas", { durationMs, used: "error", fallback: true });
+    throw err;
+  }
 
-  const prompt = `${IDEAS_SYSTEM}\n\n--- COMPANY CONTEXT ---\n${richCtx}${inspirationSection}`;
+  const durationMs = Math.round(performance.now() - t0);
+  logGeminiCall("ideas", { durationMs, used: "gemini", fallback: false });
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
-
-  // Parse — Gemini with responseMimeType:"application/json" should return clean JSON
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    // Try extracting JSON from potential markdown fences
     const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
     const jsonStr = fenceMatch ? fenceMatch[1].trim() : text.trim();
     parsed = JSON.parse(jsonStr);

@@ -2,11 +2,7 @@
    Generates ONE idea from a user's description + existing job context. */
 
 import type { Idea, CompanyContext, JobEvidence, EffortLevel } from "./types";
-
-/* ── Gemini config ── */
-
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
-const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || "v1beta";
+import { getGeminiModel, getGeminiApiVersion, logGeminiCall } from "./geminiConfig";
 
 /* ── Context builder (reuses same shape as gemini.ts) ── */
 
@@ -54,7 +50,7 @@ Output ONLY the JSON object. No markdown, no fences.`;
 
 /* ── Gemini call ── */
 
-async function callGemini(
+async function callGeminiForCustom(
   description: string,
   contextBlock: string
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -62,19 +58,23 @@ async function callGemini(
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
 
+  const modelId = getGeminiModel("custom");
+  const apiVersion = getGeminiApiVersion();
+  const t0 = performance.now();
+
   try {
     const { GoogleGenerativeAI } = await import("@google/generative-ai");
     const genAI = new GoogleGenerativeAI(key);
     const model = genAI.getGenerativeModel(
       {
-        model: GEMINI_MODEL,
+        model: modelId,
         generationConfig: {
           temperature: 0.8,
           maxOutputTokens: 2048,
           responseMimeType: "application/json",
         },
       },
-      { apiVersion: GEMINI_API_VERSION }
+      { apiVersion }
     );
 
     const prompt = `${SYSTEM}\n\n--- COMPANY CONTEXT ---\n${contextBlock}\n\n--- USER'S IDEA DESCRIPTION ---\n${description}`;
@@ -95,9 +95,17 @@ async function callGemini(
       parsed = JSON.parse(m ? m[1].trim() : text.trim());
     }
 
-    if (parsed.title && parsed.summary) return parsed;
+    if (parsed.title && parsed.summary) {
+      const durationMs = Math.round(performance.now() - t0);
+      logGeminiCall("custom", { durationMs, used: "gemini", fallback: false });
+      return parsed;
+    }
+    const durationMs = Math.round(performance.now() - t0);
+    logGeminiCall("custom", { durationMs, used: "invalid_json", fallback: true });
     return null;
   } catch {
+    const durationMs = Math.round(performance.now() - t0);
+    logGeminiCall("custom", { durationMs, used: "error", fallback: true });
     return null;
   }
 }
@@ -142,7 +150,7 @@ export async function generateCustomIdea(
   usedGemini: boolean;
 }> {
   const contextBlock = buildContext(ctx, evidence);
-  const geminiResult = await callGemini(description, contextBlock);
+  const geminiResult = await callGeminiForCustom(description, contextBlock);
 
   if (geminiResult) {
     return {

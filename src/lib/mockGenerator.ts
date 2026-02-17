@@ -310,136 +310,146 @@ function buildTerminalSetup(folderName: string): string {
   ].join("\n");
 }
 
-const BMAD = `Each prompt uses a **BMAD role** — the mindset Cursor should adopt for that step:
-• **PM+UX** — create the branded page skeleton with layout, CSS vars, and TODO markers.
-• **FE** — make the skeleton real: wire data, add interaction, keep it demo-safe.
-• **FE+QA** — fix errors, tighten polish, add one microinteraction. No new libraries.`;
+/** Return the target prompt count for a given effort level. */
+function promptCountForEffort(effort: EffortLevel): number {
+  switch (effort) {
+    case "15min": return 2;
+    case "1hr": return 4;
+    case "4hr": return 6;
+    case "8hr": return 7;
+    case "1-3days": return 10;
+  }
+}
 
 export function generateMockBuildPlan(idea: Idea, companyName?: string): BuildPlan {
   const o = idea.outline;
   const name = idea.title;
   const co = companyName || name.split(" ")[0];
   const folderName = buildFolderName(co, name);
+  const count = promptCountForEffort(idea.effort);
 
-  const steps: BuildStep[] = [
-    /* ── Prompt 1: PM+UX — Brand + skeleton ── */
-    {
-      title: "Brand + skeleton",
-      role: "PM+UX",
-      instruction: `Create the branded page skeleton for "${name}" with header, hero, placeholder sections, and TODO markers.`,
-      cursorPrompt: [
-        `BMAD ROLE: PM+UX — Create the branded page skeleton with layout, CSS variables, and TODO markers. Do not implement real features yet.`,
-        ``,
-        `Prototype: "${name}"`,
-        `${idea.summary}`,
-        `Effort: ${idea.effort}`,
-        ``,
-        `Replace the contents of src/app/page.tsx with a "use client" page (TypeScript, Tailwind).`,
-        ``,
-        `Page structure:`,
-        `1. Header — "${co}" + "Prototype" badge (leave a spot for a favicon <img> if one is provided later)`,
-        `2. Hero — "${name}" as h1, one-liner pitch below it`,
-        `3. Main section — render placeholder cards/sections for:`,
-        ...o.pages.map((p) => `   • ${p}`),
-        `   Mark each section with {/* TODO: implement ${o.components[0] || "component"} */} comments`,
-        `4. Primary CTA button + secondary ghost button`,
-        `5. Footer — "Built with Amuse Bouchenator"`,
-        ``,
-        `Styling rules:`,
-        `- Wrap everything in a <div> that sets these CSS vars on its style prop:`,
-        `  --ab-primary, --ab-accent, --ab-bg, --ab-text, --ab-font`,
-        `  (hardcode placeholder values for now; brand vibe values will be injected below)`,
-        `- All buttons: background-color var(--ab-primary), border-radius 12px`,
-        `- All cards: border-radius 12px, hover ring with var(--ab-accent)`,
-        `- Links: color var(--ab-primary)`,
-        `- Badges: background color-mix(in srgb, var(--ab-accent) 15%, transparent)`,
-        ``,
-        `Components to stub (empty for now):`,
-        ...o.components.slice(0, 5).map((c) => `  - ${c}`),
-        ``,
-        `Data types to define (TypeScript interfaces, no real data yet):`,
-        ...o.data.map((d) => `  - ${d}`),
-        ``,
-        `Do NOT implement real logic or fetch data. Just the skeleton + TODOs.`,
-      ].join("\n"),
-      doneLooksLike: [
-        `• localhost:3000 renders with header, hero, placeholder cards`,
-        `• CSS var wrapper present, buttons/cards use var(--ab-primary)`,
-        `• TODO markers visible in code for each section`,
-      ].join("\n"),
-    },
+  const steps: BuildStep[] = [];
 
-    /* ── Prompt 2: FE — Make it real ── */
-    {
-      title: "Make it real",
+  /* ── Prompt 1: PM+UX — Brand + skeleton (always present) ── */
+  steps.push({
+    title: "Set up the branded page skeleton",
+    role: "PM+UX",
+    instruction: `Create the branded page skeleton for "${name}" with header, hero, placeholder sections, and TODO markers.`,
+    cursorPrompt: [
+      `BMAD ROLE: PM+UX — Create the branded page skeleton with layout, CSS variables, and TODO markers. Do not implement real features yet.`,
+      ``,
+      `Prototype: "${name}"`,
+      `${idea.summary}`,
+      ``,
+      `Replace src/app/page.tsx with a "use client" page (TypeScript, Tailwind).`,
+      ``,
+      `Page structure:`,
+      `1. Header — "${co}" + "Prototype" badge`,
+      `2. Hero — "${name}" as h1, one-liner pitch`,
+      `3. Main section — placeholder cards for:`,
+      ...o.pages.map((p) => `   • ${p}`),
+      `   Mark each with {/* TODO: implement */} comments`,
+      `4. Primary CTA button + secondary ghost button`,
+      `5. Footer — "Built with Amuse Bouchenator"`,
+      ``,
+      `Styling:`,
+      `- Wrap in a <div> with CSS vars: --ab-primary, --ab-accent, --ab-bg, --ab-text, --ab-font`,
+      `- Buttons: bg var(--ab-primary), border-radius 12px`,
+      `- Cards: border-radius 12px, hover ring var(--ab-accent)`,
+      ``,
+      `Stub components: ${o.components.slice(0, 5).join(", ")}`,
+      `Define TypeScript interfaces for: ${o.data.join(", ")}`,
+      ``,
+      `Do NOT implement real logic. Just the skeleton + TODOs.`,
+    ].join("\n"),
+    doneLooksLike: [
+      `• localhost:3000 renders with header, hero, placeholder cards`,
+      `• CSS var wrapper present, buttons/cards use var(--ab-primary)`,
+      `• TODO markers visible in code for each section`,
+    ].join("\n"),
+  });
+
+  /* ── Middle prompts: FE — Build features (variable count) ── */
+  const feCount = Math.max(1, count - 2);
+  const componentChunks = chunkArray(o.components, feCount);
+
+  for (let i = 0; i < feCount; i++) {
+    const comps = componentChunks[i] || o.components.slice(0, 2);
+    const isLast = i === feCount - 1;
+    steps.push({
+      title: feCount === 1
+        ? "Build the core features"
+        : `Build features — part ${i + 1} of ${feCount}`,
       role: "FE",
-      instruction: `Replace the TODO placeholders with working interaction, wired data, and styled components for "${name}".`,
+      instruction: `Implement ${comps.join(", ")} with real data and interaction.`,
       cursorPrompt: [
-        `BMAD ROLE: FE — Implement the real interaction, components, and data wiring. Keep it simple and demo-safe.`,
+        `BMAD ROLE: FE — Implement real interaction and data wiring. Keep it simple and demo-safe.`,
         ``,
-        `In src/app/page.tsx (created by Prompt 1), replace every TODO marker with a working implementation.`,
-        ``,
-        `What to build:`,
-        ...o.components.slice(0, 6).map((c) => `  - ${c}: implement as a real component with typed props`),
-        ``,
-        `Data:`,
-        ...o.data.map((d) => `  - ${d}: create mock data inline or in a small src/lib/data.ts file`),
+        `In src/app/page.tsx, replace the TODO markers for these components with working code:`,
+        ...comps.map((c) => `  - ${c}: implement with typed props and real inline data`),
         ``,
         `Requirements:`,
-        `- Wire mock data so lists/cards show real content`,
-        `- Buttons trigger visible state changes (counters, toggles, selections)`,
-        `- Ensure all interactive elements use the existing CSS vars (--ab-primary, --ab-accent)`,
-        `- Add loading states for any async-feeling actions`,
+        `- Wire inline data so lists/cards show real content`,
+        `- Buttons trigger visible state changes`,
+        `- Use existing CSS vars (--ab-primary, --ab-accent)`,
         `- Keep it responsive (mobile-first Tailwind)`,
-        `- Accessible: semantic HTML, ARIA labels on interactive elements`,
-        o.niceToHave.length
+        isLast && o.niceToHave.length
           ? `- Nice-to-have (only if quick): ${o.niceToHave.join(", ")}`
           : ``,
         ``,
-        `No external APIs. No new UI libraries. Keep everything in 1–2 files max.`,
-      ]
-        .filter(Boolean)
-        .join("\n"),
+        `No external APIs. No new UI libraries.`,
+      ].filter(Boolean).join("\n"),
       doneLooksLike: [
-        `• Placeholder TODOs are gone — real components render`,
-        `• Clicking buttons / cards triggers visible feedback`,
-        `• npm run build passes without errors`,
+        `• ${comps[0] || "Component"} renders with real data`,
+        `• Clicking buttons triggers visible feedback`,
+        `• No console errors`,
       ].join("\n"),
-    },
+    });
+  }
 
-    /* ── Prompt 3 (optional): FE+QA — Fix + polish ── */
-    {
-      title: "Fix + polish",
-      role: "FE+QA",
-      instruction: `Fix any errors, add empty state, tighten spacing, and add one microinteraction to "${name}".`,
-      cursorPrompt: [
-        `BMAD ROLE: FE+QA — Fix errors, tighten polish, and add one microinteraction. No new libraries.`,
-        ``,
-        `Review src/app/page.tsx and any supporting files, then fix:`,
-        ``,
-        `1. Fix any TypeScript or ESLint errors (run \`npx tsc --noEmit\` to check)`,
-        `2. Fix any runtime/console errors`,
-        `3. Add an empty state for lists or sections with no data ("Nothing here yet")`,
-        `4. Tighten spacing: ensure consistent padding (p-4/p-6), remove any awkward gaps`,
-        `5. Add one microinteraction: a subtle hover scale on cards (hover:scale-[1.02] transition-transform) or a fade-in entrance (animate-in)`,
-        ``,
-        `Do NOT add new npm packages. Do NOT refactor architecture. Just polish what exists.`,
-      ].join("\n"),
-      doneLooksLike: [
-        `• \`npx tsc --noEmit\` passes clean`,
-        `• No console errors at runtime`,
-        `• One visible micro-animation on hover or entrance`,
-      ].join("\n"),
-    },
-  ];
+  /* ── Last prompt: FE+QA — Fix + polish (always present) ── */
+  steps.push({
+    title: "Fix errors and add polish",
+    role: "FE+QA",
+    instruction: `Fix any errors, add empty state, tighten spacing, and add one microinteraction to "${name}".`,
+    cursorPrompt: [
+      `BMAD ROLE: FE+QA — Fix errors, tighten polish, and add one microinteraction. No new libraries.`,
+      ``,
+      `Review src/app/page.tsx and any supporting files:`,
+      ``,
+      `1. Fix any TypeScript or ESLint errors`,
+      `2. Fix any runtime/console errors`,
+      `3. Add empty state for lists with no data ("Nothing here yet")`,
+      `4. Tighten spacing: consistent padding, no awkward gaps`,
+      `5. Add one microinteraction: hover:scale-[1.02] on cards or a fade-in entrance`,
+      ``,
+      `Do NOT add new npm packages. Just polish what exists.`,
+    ].join("\n"),
+    doneLooksLike: [
+      `• npx tsc --noEmit passes clean`,
+      `• No console errors at runtime`,
+      `• One visible micro-animation on hover or entrance`,
+    ].join("\n"),
+  });
 
   return {
     ideaId: idea.id,
-    bmadExplanation: BMAD,
+    bmadExplanation: "",
     terminalSetup: buildTerminalSetup(folderName),
     folderName,
     steps,
   };
+}
+
+/** Split an array into N roughly equal chunks. */
+function chunkArray<T>(arr: T[], n: number): T[][] {
+  if (n <= 0) return [arr];
+  const result: T[][] = [];
+  const size = Math.ceil(arr.length / n);
+  for (let i = 0; i < n; i++) {
+    result.push(arr.slice(i * size, (i + 1) * size));
+  }
+  return result;
 }
 
 /* ── Public: custom idea mock ── */

@@ -13,12 +13,26 @@ import type {
   JobEvidence,
 } from "@/lib/types";
 import { EFFORT_LEVELS } from "@/lib/effort";
+import AppHeader from "@/components/AppHeader";
 
 /* ═══════════════════════════════════════════
    State machine
    ═══════════════════════════════════════════ */
 
 type AppState = "input" | "disambiguation" | "cooking" | "results";
+
+/* ── Default pipeline steps (mirrors buildInitialSteps in analyzer.ts) ──
+   Shown immediately so the checklist is never blank. */
+const DEFAULT_PIPELINE_STEPS: AnalysisStep[] = [
+  { id: "resolve", label: "Resolving company identity", status: "pending" },
+  { id: "website", label: "Finding official website", status: "pending" },
+  { id: "pages", label: "Reading key pages", status: "pending" },
+  { id: "brandstyle", label: "Sampling brand styles (colors + fonts)", status: "pending" },
+  { id: "press", label: "Checking newsroom / press releases", status: "pending" },
+  { id: "news", label: "Checking recent news", status: "pending" },
+  { id: "producthunt", label: "Checking Product Hunt for inspiration", status: "pending" },
+  { id: "generate", label: "Generating Amuse Bouchenator suggestions", status: "pending" },
+];
 
 /* Amuse UI uses a fixed theme — brand colors only flow into generated prompts */
 
@@ -522,11 +536,11 @@ function CustomIdeaBuilder({ companyContext }: { companyContext: CompanyContext 
               {result.plan.bmadExplanation}
             </p>
 
-            {/* Prompt 0: Terminal Setup */}
+            {/* Step 1: Terminal Setup */}
             <div className="rounded-xl border-2 border-emerald-200 bg-white p-5">
               <div className="flex items-center gap-2 mb-2">
                 <span className="flex items-center justify-center h-6 w-6 rounded-full bg-emerald-100 text-xs font-bold text-emerald-700">
-                  0
+                  1
                 </span>
                 <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-xs font-medium text-emerald-700">
                   Terminal
@@ -555,7 +569,7 @@ function CustomIdeaBuilder({ companyContext }: { companyContext: CompanyContext 
               </button>
             </div>
 
-            {/* Prompts 1-3 */}
+            {/* Steps 2–N */}
             {result.plan.steps.map((step: BuildStep, i: number) => {
               const isOptional = i >= 2;
               return (
@@ -569,7 +583,7 @@ function CustomIdeaBuilder({ companyContext }: { companyContext: CompanyContext 
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <span className="flex items-center justify-center h-6 w-6 rounded-full bg-zinc-100 text-xs font-bold text-zinc-600">
-                      {i + 1}
+                      {i + 2}
                     </span>
                     <span className="ab-role-badge rounded-full px-2 py-0.5 text-xs font-medium">
                       {step.role}
@@ -606,7 +620,7 @@ function CustomIdeaBuilder({ companyContext }: { companyContext: CompanyContext 
                       ? "✓ Copied"
                       : isOptional
                       ? "Copy Fix + Polish prompt"
-                      : `Copy Prompt ${i + 1}`}
+                      : `Copy Prompt ${i + 2}`}
                   </button>
                   <div className="mt-2 text-xs text-zinc-500">
                     <span className="font-medium">Done looks like:</span>
@@ -668,7 +682,10 @@ export default function HomePage() {
   const [disambiguationOptions, setDisambiguationOptions] = useState<DisambiguationOption[]>([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [cookingElapsed, setCookingElapsed] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cookingStartRef = useRef<number>(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /* ── Submit ── */
   const handleSubmit = useCallback(
@@ -692,6 +709,8 @@ export default function HomePage() {
           setState("disambiguation");
         } else if (data.jobId) {
           setJobId(data.jobId);
+          cookingStartRef.current = Date.now();
+          setCookingElapsed(0);
           setState("cooking");
         } else {
           setError(data.error || "Something went wrong");
@@ -708,36 +727,59 @@ export default function HomePage() {
   /* ── Polling ── */
   useEffect(() => {
     if (state !== "cooking" || !jobId) return;
+    let pollFailures = 0;
 
     const poll = async () => {
       try {
         const res = await fetch(`/api/jobs/${jobId}`);
+        if (!res.ok) {
+          pollFailures++;
+          if (pollFailures >= 5) {
+            setError("Lost connection to server. Please try again.");
+            setState("input");
+          }
+          return;
+        }
+        pollFailures = 0;
         const data = await res.json();
-        setSteps(data.steps ?? []);
+        if (data.steps?.length) setSteps(data.steps);
         if (data.companyContext) setCompanyContext(data.companyContext);
         if (data.evidence) setEvidence(data.evidence);
 
         if (data.status === "done") {
-          // Navigate to addressable results page
           router.push(`/results/${jobId}`);
         } else if (data.status === "failed") {
           setError("Analysis failed. Please try again.");
           setState("input");
         }
       } catch {
-        /* retry next tick */
+        pollFailures++;
+        if (pollFailures >= 5) {
+          setError("Lost connection to server. Please try again.");
+          setState("input");
+        }
       }
     };
 
-    poll(); // immediate first check
-    pollRef.current = setInterval(poll, 1000);
+    poll();
+    pollRef.current = setInterval(poll, 1200);
+
+    // Elapsed seconds timer for timeout UX
+    timerRef.current = setInterval(() => {
+      const elapsed = Math.round((Date.now() - cookingStartRef.current) / 1000);
+      setCookingElapsed(elapsed);
+    }, 1000);
+
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [state, jobId]);
+  }, [state, jobId, router]);
 
   /* ── Reset ── */
   const reset = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
     setState("input");
     setInput("");
     setJobId(null);
@@ -746,34 +788,13 @@ export default function HomePage() {
     setCompanyContext({ name: "" });
     setEvidence(null);
     setError("");
+    setCookingElapsed(0);
   };
 
   /* ── Render ── */
   return (
     <div className="min-h-screen bg-zinc-50">
-      {/* Header */}
-      <header className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto max-w-5xl px-6 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
-                Amuse Bouchenator
-              </h1>
-              <p className="mt-1 text-sm text-zinc-500">
-                Taster-menu generator for quick-win prototypes — with Cursor-ready build steps
-              </p>
-            </div>
-            {state !== "input" && (
-              <button
-                onClick={reset}
-                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 transition-colors"
-              >
-                Start over
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
+      <AppHeader />
 
       <main className="mx-auto max-w-5xl px-6 py-10">
         {/* ── Input state ── */}
@@ -869,55 +890,67 @@ export default function HomePage() {
         )}
 
         {/* ── Cooking state ── */}
-        {state === "cooking" && (
-          <div className="mx-auto max-w-md">
-            <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
-              <h2 className="text-lg font-semibold text-zinc-900 mb-1">
-                Cooking up ideas
-                {companyContext.name && companyContext.name !== input
-                  ? ` for ${companyContext.name}`
-                  : ""}
-                ...
-              </h2>
-              <p className="text-sm text-zinc-500 mb-6">
-                This can take up to 60 seconds. We&apos;re gathering context and
-                generating suggestions.
-              </p>
-              <ul className="space-y-3">
-                {steps.map((step) => (
-                  <li key={step.id} className="flex items-start gap-3">
-                    <span className="mt-0.5">
-                      <StepIcon status={step.status} />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <span
-                        className={`text-sm ${
-                          step.status === "running"
-                            ? "font-medium text-zinc-900"
-                            : step.status === "done"
-                            ? "text-zinc-700"
-                            : step.status === "skipped" || step.status === "failed"
-                            ? "text-zinc-400 line-through"
-                            : "text-zinc-500"
-                        }`}
-                      >
-                        {step.label}
+        {state === "cooking" && (() => {
+          const displaySteps = steps.length > 0 ? steps : DEFAULT_PIPELINE_STEPS;
+          const timedOut = cookingElapsed >= 60;
+          return (
+            <div className="mx-auto max-w-md">
+              <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
+                <h2 className="text-lg font-semibold text-zinc-900 mb-1">
+                  {timedOut ? "Still working" : "Cooking up ideas"}
+                  {companyContext.name && companyContext.name !== input
+                    ? ` for ${companyContext.name}`
+                    : ""}
+                  ...
+                </h2>
+                <p className="text-sm text-zinc-500 mb-6">
+                  {timedOut
+                    ? "This is taking longer than usual. You can keep waiting or start over."
+                    : "This can take up to 60 seconds. We\u2019re gathering context and generating suggestions."}
+                </p>
+                <ul className="space-y-3">
+                  {displaySteps.map((step) => (
+                    <li key={step.id} className="flex items-start gap-3">
+                      <span className="mt-0.5">
+                        <StepIcon status={step.status} />
                       </span>
-                      {step.note && (step.status === "done" || step.status === "skipped") && (
-                        <span className="ml-2 text-xs text-zinc-400">
-                          — {step.note}
+                      <div className="flex-1 min-w-0">
+                        <span
+                          className={`text-sm ${
+                            step.status === "running"
+                              ? "font-medium text-zinc-900"
+                              : step.status === "done"
+                              ? "text-zinc-700"
+                              : step.status === "skipped" || step.status === "failed"
+                              ? "text-zinc-400 line-through"
+                              : "text-zinc-500"
+                          }`}
+                        >
+                          {step.label}
                         </span>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-
-
-
+                        {step.note && (step.status === "done" || step.status === "skipped") && (
+                          <span className="ml-2 text-xs text-zinc-400">
+                            — {step.note}
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {timedOut && (
+                  <div className="mt-6 pt-4 border-t border-zinc-100">
+                    <button
+                      onClick={reset}
+                      className="w-full rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 transition-colors"
+                    >
+                      Start over
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── Results state ── */}
         {state === "results" && (

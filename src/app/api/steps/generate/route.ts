@@ -16,6 +16,11 @@ import type {
   InspirationPack,
 } from "@/lib/types";
 
+/* ── Request ID helper ── */
+function makeRequestId(): string {
+  return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 /* ── Slug + folder helpers (mirrored from ai.ts) ── */
 
 function toSlug(title: string): string {
@@ -132,74 +137,184 @@ function buildStepContext(
   return lines.join("\n");
 }
 
-/* ── Gemini system prompt ── */
+/* ── Effort → prompt-count range ── */
 
-const GEMINI_STEPS_SYSTEM = `You are an expert engineering coach who writes Cursor AI prompts.
-Generate a build plan for a STANDALONE Next.js prototype (its own fresh app, main page: src/app/page.tsx).
+import type { EffortLevel } from "@/lib/types";
 
-OUTPUT: valid JSON with these exact fields:
-{
-  "bmadExplanation": "2-3 sentences about BMAD roles",
-  "prompt1": { "role": "PM+UX", "title": "Brand + skeleton", "goal": "...", "promptText": "...", "doneLooksLike": ["bullet1","bullet2","bullet3"] },
-  "prompt2": { "role": "FE", "title": "Make it real", "goal": "...", "promptText": "...", "doneLooksLike": ["bullet1","bullet2","bullet3"] },
-  "prompt3": { "role": "FE+QA", "title": "Fix + polish", "goal": "...", "promptText": "...", "doneLooksLike": ["bullet1","bullet2","bullet3"] }
+function promptCountRange(effort: string): [number, number] {
+  switch (effort) {
+    case "15min":   return [2, 3];
+    case "1hr":     return [3, 5];
+    case "4hr":     return [5, 8];
+    case "8hr":     return [5, 8];
+    case "1-3days": return [8, 14];
+    default:        return [3, 8];
+  }
 }
 
-CRITICAL RULES:
+/* ── Gemini system prompt ── */
+
+function buildStepsSystemPrompt(effort: EffortLevel, themeReminder = false): string {
+  const [min, max] = promptCountRange(effort);
+  const themeWarning = themeReminder
+    ? `\n\nCRITICAL REMINDER: Your previous attempt IGNORED the Brand Vibe Pack. This time you MUST include theme usage in EVERY prompt. Every promptText must reference PROTOTYPE_THEME or CSS variables. This is mandatory.\n`
+    : "";
+  return `You are an expert engineering coach writing a beginner-friendly guided workshop.
+The user will copy your prompts one at a time into Cursor AI to build a STANDALONE Next.js prototype (its own fresh app, main page: src/app/page.tsx).
+${themeWarning}
+PLANNING PROCESS — follow these steps in order:
+
+Step A: List the milestones a beginner needs to reach to build this idea.
+  Think of the build as a story: what does the user see after each milestone?
+  Each milestone should be a meaningful checkpoint — not just "add a file" but "now the page shows X and Y works".
+
+Step B: Decide how many prompts are needed to implement those milestones.
+  - The number of prompts is an OUTCOME of the milestones, not a fixed target.
+  - If the milestones naturally require fewer than ${min} prompts, merge smaller milestones until you reach at least ${min}.
+  - If the milestones naturally require more than ${max} prompts, combine related milestones until you have at most ${max}.
+  - The final prompt count MUST be between ${min} and ${max} (inclusive).
+
+Step C: Write the prompts.
+
+OUTPUT: valid JSON:
+{
+  "totalPrompts": <number>,
+  "rationaleForPromptCount": "<1–3 sentences explaining why you chose this many prompts based on the milestones>",
+  "prompts": [
+    {
+      "role": "PM+UX" | "FE" | "FE+QA",
+      "title": "plain-language title a beginner would understand",
+      "goal": "why we're doing this — 1–2 sentences explaining the purpose of this milestone",
+      "promptText": "the full Cursor prompt (pasted verbatim into Cursor)",
+      "doneLooksLike": ["what you should see when it worked — bullet 1","bullet 2","bullet 3"]
+    }
+  ]
+}
+
+PROMPT STRUCTURE RULES:
 1. promptText MUST start with "BMAD ROLE: <ROLE> — <1 sentence role instruction>" on the first line.
-2. prompt1 (PM+UX) MUST:
-   - Assume the app is a FRESH standalone Next.js project already scaffolded (Prompt 0 handled that).
-   - Replace src/app/page.tsx with a branded skeleton using "use client".
-   - Apply the Brand Vibe Pack values via CSS variables (--ab-primary, --ab-accent, --ab-bg, --ab-text, --ab-font).
-   - Create src/lib/prototypeTheme.ts with the exact brand values.
-   - Build: header (company name + "Prototype" badge, favicon if provided), hero, placeholder sections with TODO markers.
-   - Buttons/cards/links styled with the theme vars.
-   - Do NOT implement real features — skeleton + TODOs only.
-3. prompt2 (FE) MUST:
-   - Replace every TODO with working implementation specific to this idea.
-   - Wire mock data, add state, make buttons trigger visible changes.
-   - Keep all styling using existing theme vars.
-   - Keep it simple and demo-safe.
-4. prompt3 (FE+QA, optional) MUST:
+
+BRAND VIBE PACK — THEME CONTRACT (MANDATORY):
+The Brand Vibe Pack is provided in the context. It MUST be used in every step.
+2. The FIRST prompt (role PM+UX) MUST:
+   - Assume the app is already scaffolded (create-next-app ran).
+   - Replace src/app/page.tsx with a "use client" branded skeleton.
+   - Create src/lib/prototypeTheme.ts exporting PROTOTYPE_THEME with the EXACT brand values from the Brand Vibe Pack (primary, accent, bg, text, fontFamily, radiusPx, companyName, faviconUrl).
+   - Apply the theme via CSS variables on the root element: --ab-primary, --ab-accent, --ab-bg, --ab-text, --ab-font, --ab-radius.
+   - Every button, card, link, and badge must use these CSS variables or PROTOTYPE_THEME values.
+   - Build header (company name + "Prototype" badge), hero, placeholder sections with TODO markers.
+   - If Brand Vibe Pack is missing or has default values, still create the theme file with sensible defaults.
+3. EVERY middle prompt (role FE) MUST:
+   - Each one delivers a specific milestone with visible progress.
+   - Reference PROTOTYPE_THEME or CSS variables (--ab-primary, etc.) for all colors, border-radius, and fonts. Do NOT hardcode colors.
+   - Wire real data inline (prefer inline arrays over separate files).
+   - Buttons trigger visible state changes. No placeholders.
+   - Build on previous prompts — never redo finished work.
+   - Include in the promptText: "Use the theme from src/lib/prototypeTheme.ts for all styling (colors, radius, font)."
+4. The LAST prompt (role FE+QA) MUST:
    - Fix TS/ESLint/runtime errors.
-   - Add empty state, tighten spacing, add one microinteraction.
-   - No new npm packages. No big checklist.
-5. doneLooksLike: max 3 bullets each.
-6. Make promptText specific, actionable, and detailed — it's pasted verbatim into Cursor.
-7. NEVER reference /p/<slug> routes. Use src/app/page.tsx.
-8. Output ONLY the JSON. No markdown, no fences, no explanation.`;
+   - Verify all components use PROTOTYPE_THEME — replace any hardcoded colors with theme variables.
+   - Add empty states, tighten spacing, add one microinteraction.
+   - No new npm packages.
+5. "goal" should explain the purpose in beginner-friendly language ("why we're doing this").
+6. "doneLooksLike" should describe what the user sees when it worked (max 3 bullets).
+7. No mock data unless unavoidable. If used, label it "temporary sample data" and note where real data would come from.
+8. Avoid databases, authentication, and external APIs unless the idea truly requires them.
+9. NEVER reference /p/<slug> routes. Use src/app/page.tsx.
+10. Output ONLY the JSON. No markdown, no fences, no explanation.`;
+}
 
-/* ── Gemini config (env-driven) ── */
+/* ── Gemini config (centralized) ── */
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
-const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || "v1beta";
+import { getGeminiModel, getGeminiApiVersion, logGeminiCall } from "@/lib/geminiConfig";
+
+/* ── Robust JSON extraction ── */
+
+function extractJsonFromText(text: string): unknown {
+  const trimmed = text.trim();
+
+  // 1. Try direct parse
+  try { return JSON.parse(trimmed); } catch { /* continue */ }
+
+  // 2. Try code-fence extraction
+  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) {
+    try { return JSON.parse(fenceMatch[1].trim()); } catch { /* continue */ }
+  }
+
+  // 3. Try finding first { to last } (prose around JSON)
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try { return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1)); } catch { /* continue */ }
+  }
+
+  // 4. Try finding first [ to last ] (array response)
+  const firstBracket = trimmed.indexOf("[");
+  const lastBracket = trimmed.lastIndexOf("]");
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    const arr = trimmed.slice(firstBracket, lastBracket + 1);
+    try {
+      const parsed = JSON.parse(arr);
+      if (Array.isArray(parsed)) return { prompts: parsed };
+    } catch { /* continue */ }
+  }
+
+  return null;
+}
+
+/* ── Step schema guard ── */
+
+function isValidGeminiStep(s: unknown): s is GeminiStep {
+  if (!s || typeof s !== "object") return false;
+  const step = s as Record<string, unknown>;
+  return (
+    typeof step.promptText === "string" && step.promptText.length > 10 &&
+    typeof step.role === "string" && step.role.length > 0
+  );
+}
+
+/* ── Call diagnostics ── */
+
+interface CallDiag {
+  responseChars: number;
+  reason: "ok" | "no_key" | "api_error" | "parse_error" | "schema_invalid" | "timeout" | "empty_response";
+  errorMessage?: string;
+}
 
 /* ── Gemini SDK call with timeout ── */
 
 async function callGeminiForSteps(
-  contextBlock: string
-): Promise<GeminiResponse | null> {
+  contextBlock: string,
+  effort: EffortLevel,
+  themeReminder = false,
+  requestId = ""
+): Promise<{ response: GeminiResponse | null; diag: CallDiag }> {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) return null;
+  if (!key) return { response: null, diag: { responseChars: 0, reason: "no_key" } };
 
+  const modelId = getGeminiModel("steps");
+  const apiVersion = getGeminiApiVersion();
+  const systemPrompt = buildStepsSystemPrompt(effort, themeReminder);
+
+  let responseChars = 0;
   try {
     const { GoogleGenerativeAI } = await import("@google/generative-ai");
     const genAI = new GoogleGenerativeAI(key);
     const model = genAI.getGenerativeModel(
       {
-        model: GEMINI_MODEL,
+        model: modelId,
         generationConfig: {
           temperature: 0.8,
-          maxOutputTokens: 6144,
+          maxOutputTokens: 8192,
           responseMimeType: "application/json",
         },
       },
-      { apiVersion: GEMINI_API_VERSION }
+      { apiVersion }
     );
 
-    const prompt = `${GEMINI_STEPS_SYSTEM}\n\n--- CONTEXT ---\n${contextBlock}`;
+    const prompt = `${systemPrompt}\n\n--- CONTEXT ---\n${contextBlock}`;
 
-    // Race against timeout
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 60000);
 
@@ -214,24 +329,51 @@ async function callGeminiForSteps(
     clearTimeout(timer);
 
     const text = result.response.text();
+    responseChars = text.length;
 
-    let parsed: GeminiResponse;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-      const jsonStr = fenceMatch ? fenceMatch[1].trim() : text.trim();
-      parsed = JSON.parse(jsonStr);
+    if (!text || text.length < 10) {
+      console.warn(`[steps] ${requestId} empty response (${responseChars} chars)`);
+      return { response: null, diag: { responseChars, reason: "empty_response" } };
     }
 
-    if (!parsed.prompt1 || !parsed.prompt2) return null;
-    if (!parsed.prompt1.promptText || !parsed.prompt2.promptText) return null;
+    const rawParsed = extractJsonFromText(text);
+    if (rawParsed === null) {
+      console.warn(`[steps] ${requestId} JSON parse failed, responseChars=${responseChars}`);
+      return { response: null, diag: { responseChars, reason: "parse_error" } };
+    }
 
-    return parsed;
+    const normalized = normalizeGeminiResponse(rawParsed);
+    if (!normalized) {
+      console.warn(`[steps] ${requestId} schema invalid after normalize, responseChars=${responseChars}`);
+      return { response: null, diag: { responseChars, reason: "schema_invalid" } };
+    }
+
+    // Validate each step has required fields
+    const validSteps = normalized.prompts.filter(isValidGeminiStep);
+    if (validSteps.length < 2) {
+      console.warn(`[steps] ${requestId} only ${validSteps.length} valid steps out of ${normalized.prompts.length}`);
+      return { response: null, diag: { responseChars, reason: "schema_invalid", errorMessage: `only ${validSteps.length} valid steps` } };
+    }
+
+    return {
+      response: { ...normalized, prompts: validSteps },
+      diag: { responseChars, reason: "ok" },
+    };
   } catch (err) {
-    console.warn("Gemini step generation failed:", err instanceof Error ? err.message : err);
-    return null;
+    const msg = err instanceof Error ? err.message : String(err);
+    const isTimeout = msg.includes("timeout");
+    console.warn(`[steps] ${requestId} Gemini call failed: ${msg}`);
+    return {
+      response: null,
+      diag: { responseChars, reason: isTimeout ? "timeout" : "api_error", errorMessage: msg },
+    };
   }
+}
+
+/** Check if the prompt count is within the expected range for the effort level. */
+function isPromptCountValid(count: number, effort: string): boolean {
+  const [min, max] = promptCountRange(effort);
+  return count >= min && count <= max;
 }
 
 interface GeminiStep {
@@ -243,10 +385,27 @@ interface GeminiStep {
 }
 
 interface GeminiResponse {
-  bmadExplanation?: string;
-  prompt1: GeminiStep;
-  prompt2: GeminiStep;
-  prompt3?: GeminiStep;
+  prompts: GeminiStep[];
+  totalPrompts?: number;
+  rationaleForPromptCount?: string;
+}
+
+/** Accept both new { prompts: [...] } and legacy { prompt1, prompt2, prompt3 } formats. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeGeminiResponse(raw: any): GeminiResponse | null {
+  if (Array.isArray(raw?.prompts) && raw.prompts.length >= 2) {
+    return {
+      prompts: raw.prompts,
+      totalPrompts: typeof raw.totalPrompts === "number" ? raw.totalPrompts : raw.prompts.length,
+      rationaleForPromptCount: typeof raw.rationaleForPromptCount === "string" ? raw.rationaleForPromptCount : undefined,
+    };
+  }
+  if (raw?.prompt1?.promptText && raw?.prompt2?.promptText) {
+    const prompts: GeminiStep[] = [raw.prompt1, raw.prompt2];
+    if (raw.prompt3?.promptText) prompts.push(raw.prompt3);
+    return { prompts, totalPrompts: prompts.length };
+  }
+  return null;
 }
 
 /** Convert Gemini output to our BuildStep format. */
@@ -332,26 +491,34 @@ function injectBrandVibeIntoMock(plan: BuildPlan, idea: Idea, theme: Theme): Bui
 
 export async function POST(request: Request) {
   const t0 = performance.now();
+  const requestId = makeRequestId();
 
   try {
     const body = await request.json();
     const ideaId: string = body.ideaId;
 
     if (!ideaId) {
-      return NextResponse.json({ error: "ideaId is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: { code: "MISSING_IDEA_ID", message: "ideaId is required", requestId } },
+        { status: 400 }
+      );
     }
 
     // Check cache
     const cached = getBuildPlan(ideaId);
     if (cached) {
       const durationMs = Math.round(performance.now() - t0);
-      console.log(`[steps] model=${GEMINI_MODEL} used=cache reason=cached`);
-      return NextResponse.json({ ...cached, used: "cache", durationMs });
+      logGeminiCall("steps", { durationMs, used: "cache", fallback: false });
+      return NextResponse.json({ ...cached, used: "cache", durationMs, requestId });
     }
 
     const idea = getIdea(ideaId);
     if (!idea) {
-      return NextResponse.json({ error: "Idea not found" }, { status: 404 });
+      console.warn(`[steps] ${requestId} idea not found: ${ideaId}`);
+      return NextResponse.json(
+        { error: { code: "IDEA_NOT_FOUND", message: "Idea not found — your session may have expired. Try starting a new search.", requestId } },
+        { status: 404 }
+      );
     }
 
     const job = getJob(idea.jobId);
@@ -362,45 +529,83 @@ export async function POST(request: Request) {
     const folderName = buildFolderName(companyName, idea.title);
     const terminalSetup = buildTerminalSetup(folderName);
 
+    const modelId = getGeminiModel("steps");
+    const apiVersion = getGeminiApiVersion();
+
     let plan: BuildPlan | null = null;
     let used: "gemini" | "fallback" = "fallback";
-    let reason = "ok";
+    let savedRationale = "";
+    let lastDiag: CallDiag | null = null;
 
-    // Try Gemini
+    // Try Gemini (with retries for prompt count, missing theme, or parse failure)
     const contextBlock = buildStepContext(idea, ctx, theme, evidence);
-    const geminiResult = await callGeminiForSteps(contextBlock);
+    const effort = idea.effort;
+    const [rangeMin, rangeMax] = promptCountRange(effort);
 
-    if (geminiResult) {
-      const steps: BuildStep[] = [
-        geminiStepToBuildStep(geminiResult.prompt1),
-        geminiStepToBuildStep(geminiResult.prompt2),
-      ];
-      if (geminiResult.prompt3?.promptText) {
-        steps.push(geminiStepToBuildStep(geminiResult.prompt3));
-      }
-
-      // Validate: at least 2 steps with actual prompt text
-      const validSteps = steps.filter((s) => s.cursorPrompt?.length > 10);
-      if (validSteps.length >= 2) {
-        plan = {
-          ideaId: idea.id,
-          bmadExplanation:
-            geminiResult.bmadExplanation ||
-            `Each prompt uses a BMAD role — the mindset Cursor should adopt. PM+UX creates the skeleton. FE makes it real. FE+QA polishes.`,
-          terminalSetup,
-          folderName,
-          steps,
-        };
-        used = "gemini";
-      } else {
-        reason = "invalid_json";
-      }
-    } else {
-      reason = process.env.GEMINI_API_KEY ? "error" : "no_key";
+    /** Check if at least the first prompt references the theme contract. */
+    function stepsUseTheme(steps: BuildStep[]): boolean {
+      if (steps.length === 0) return false;
+      const firstPrompt = steps[0].cursorPrompt.toLowerCase();
+      return (
+        firstPrompt.includes("prototypetheme") ||
+        firstPrompt.includes("prototype_theme") ||
+        firstPrompt.includes("--ab-primary") ||
+        firstPrompt.includes("brand vibe") ||
+        firstPrompt.includes("theme")
+      );
     }
 
-    // Fallback to deterministic mock if Gemini didn't produce a valid plan
+    let themeReminder = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { response: geminiResult, diag } = await callGeminiForSteps(contextBlock, effort, themeReminder, requestId);
+      lastDiag = diag;
+
+      if (!geminiResult) {
+        // On first attempt parse/schema failure, retry with stronger JSON instruction
+        if (attempt === 0 && (diag.reason === "parse_error" || diag.reason === "schema_invalid")) {
+          console.log(`[steps] ${requestId} ${diag.reason}, retrying with JSON-only reminder`);
+          themeReminder = true;
+          continue;
+        }
+        break;
+      }
+
+      const steps: BuildStep[] = geminiResult.prompts.map(geminiStepToBuildStep);
+      const validSteps = steps.filter((s) => s.cursorPrompt?.length > 10);
+
+      if (validSteps.length < 2) {
+        if (attempt === 0) {
+          console.log(`[steps] ${requestId} too few valid steps (${validSteps.length}), retrying`);
+          continue;
+        }
+        break;
+      }
+
+      const rationale = (geminiResult.rationaleForPromptCount || "").slice(0, 120);
+      const usesTheme = stepsUseTheme(validSteps);
+      console.log(`[steps] ${requestId} effort=${effort} expected=${rangeMin}-${rangeMax} got=${validSteps.length} theme=${usesTheme} rationale="${rationale}"`);
+      savedRationale = geminiResult.rationaleForPromptCount || "";
+
+      if (isPromptCountValid(validSteps.length, effort)) {
+        if (!usesTheme && attempt === 0) {
+          console.log(`[steps] ${requestId} theme not referenced, retrying with reminder`);
+          themeReminder = true;
+          continue;
+        }
+        plan = { ideaId: idea.id, bmadExplanation: "", terminalSetup, folderName, steps: validSteps };
+        used = "gemini";
+        break;
+      }
+
+      if (attempt === 0) {
+        console.log(`[steps] ${requestId} count out of range, retrying`);
+        themeReminder = !usesTheme;
+      }
+    }
+
+    // Fallback to deterministic plan if Gemini didn't produce a valid result
     if (!plan) {
+      console.log(`[steps] ${requestId} falling back to generated plan (reason=${lastDiag?.reason ?? "unknown"} responseChars=${lastDiag?.responseChars ?? 0})`);
       const mockPlan = generateMockBuildPlan(idea, companyName);
       plan = injectBrandVibeIntoMock(
         { ...mockPlan, terminalSetup, folderName },
@@ -414,9 +619,23 @@ export async function POST(request: Request) {
     storeBuildPlan(plan);
 
     const durationMs = Math.round(performance.now() - t0);
-    console.log(`[steps] model=${GEMINI_MODEL} used=${used} reason=${reason} ${durationMs}ms`);
-    return NextResponse.json({ ...plan, used, durationMs });
-  } catch {
-    return NextResponse.json({ error: "Generation failed" }, { status: 500 });
+    logGeminiCall("steps", { durationMs, used, fallback: used === "fallback" });
+    console.log(`[steps] ${requestId} done effort=${effort} model=${modelId} apiVersion=${apiVersion} used=${used} durationMs=${durationMs} steps=${plan.steps.length}`);
+
+    return NextResponse.json({
+      ...plan,
+      used,
+      durationMs,
+      requestId,
+      ...(savedRationale ? { rationaleForPromptCount: savedRationale } : {}),
+    });
+  } catch (err) {
+    const durationMs = Math.round(performance.now() - t0);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[steps] ${requestId} unhandled error durationMs=${durationMs}: ${msg}`);
+    return NextResponse.json(
+      { error: { code: "STEPS_FAILED", message: "Step generation encountered an unexpected error. Please try again.", requestId } },
+      { status: 500 }
+    );
   }
 }

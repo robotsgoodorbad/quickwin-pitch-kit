@@ -1,11 +1,14 @@
 /* ── AI provider wrapper with graceful fallback ──
    Tries Gemini (SDK) → OpenAI → Gemini (REST) → mock generator.
-   Build plans always use the 2+1 BMAD prompt format. */
+   Build plans always use the 2+1 BMAD prompt format.
+   Idea generation uses ContextBundle as the SOLE source of truth. */
 
-import type { Idea, BuildPlan, BuildStep, CompanyContext, Theme, JobEvidence } from "./types";
+import type { Idea, BuildPlan, CompanyContext, Theme, ContextBundle } from "./types";
 import { generateMockIdeas, generateMockBuildPlan, generateMockCustomPlan } from "./mockGenerator";
 import { generateIdeasWithGemini } from "./gemini";
+import { contextBundleToPrompt, summarizeContextBundleForLogs } from "./contextBundle";
 import { DEFAULT_THEME } from "./theme";
+import { type GeminiStage, getGeminiModel, getGeminiApiVersion, logGeminiCall } from "./geminiConfig";
 
 /* ── Return type for idea generation (includes observability metadata) ── */
 
@@ -49,12 +52,14 @@ async function callOpenAI(
   }
 }
 
-async function callGemini(prompt: string): Promise<string | null> {
+async function callGeminiREST(prompt: string, stage: GeminiStage): Promise<string | null> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
+  const modelId = getGeminiModel(stage);
+  const apiVersion = getGeminiApiVersion();
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelId}:generateContent?key=${key}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -75,12 +80,13 @@ async function callGemini(prompt: string): Promise<string | null> {
 
 async function callLLM(
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
+  stage: GeminiStage = "ideas"
 ): Promise<string | null> {
   const openai = await callOpenAI(systemPrompt, userPrompt);
   if (openai) return openai;
   const combined = `${systemPrompt}\n\n${userPrompt}`;
-  return callGemini(combined);
+  return callGeminiREST(combined, stage);
 }
 
 function extractJSON(text: string): string {
@@ -91,29 +97,8 @@ function extractJSON(text: string): string {
   return text.trim();
 }
 
-/* ── Context builder ── */
-
-function buildContextString(ctx: CompanyContext, evidence?: JobEvidence): string {
-  const parts: string[] = [`Company: ${ctx.name}`];
-  if (ctx.url) parts.push(`Website: ${ctx.url}`);
-  if (ctx.description) parts.push(`Description: ${ctx.description}`);
-  if (ctx.industryHints?.length) parts.push(`Industry: ${ctx.industryHints.join(", ")}`);
-  if (ctx.headings?.length) parts.push(`Key headings from site: ${ctx.headings.slice(0, 10).join("; ")}`);
-  if (ctx.navLabels?.length) parts.push(`Navigation labels: ${ctx.navLabels.join(", ")}`);
-  if (ctx.pressHeadlines?.length) parts.push(`Recent press: ${ctx.pressHeadlines.slice(0, 5).join("; ")}`);
-  if (ctx.newsItems?.length) parts.push(`Recent news: ${ctx.newsItems.slice(0, 5).join("; ")}`);
-
-  // Inspiration Pack (common patterns for grounding)
-  const pack = evidence?.inspirationPack;
-  if (pack && pack.commonPatterns.length > 0) {
-    parts.push(`Inspiration patterns:\n${pack.commonPatterns.map((p) => `  • ${p}`).join("\n")}`);
-  }
-
-  return parts.join("\n");
-}
-
 /* ══════════════════════════════════════════════
-   Public: generate ideas
+   Public: generate ideas (uses ContextBundle only)
    ══════════════════════════════════════════════ */
 
 const IDEAS_SYSTEM = `You are a creative product strategist. Generate exactly 15 quick-win prototype ideas for a company. The ideas should be web-app prototypes buildable with Next.js + Tailwind.
@@ -123,26 +108,31 @@ Output ONLY valid JSON — an array of 15 objects with these fields:
 - summary (string, 1-2 sentences)
 - effort (string, one of: "15min", "1hr", "4hr", "8hr", "1-3days")
 - outline (object with: pages: string[], components: string[], data: string[], niceToHave: string[])
-- inspiredAngle (string, 1 sentence: the creative angle grounded in a common product pattern)
+- inspiredAngle (string, 1 sentence: the creative angle grounded in a common product pattern or company context)
 
 Requirements:
 - Exactly 3 ideas per effort level (15min, 1hr, 4hr, 8hr, 1-3days)
 - Order from easiest to hardest
 - Ideas should be specific to the company's domain and offerings
 - Each idea should be a distinct, buildable prototype
-- If inspiration patterns are provided, ground each idea's inspiredAngle in one of them`;
+- If inspiration patterns are provided, ground each idea's inspiredAngle in one of them
+- If no inspiration patterns, base inspiredAngle on the company's own context`;
 
 export async function generateIdeas(
   jobId: string,
-  context: CompanyContext,
-  evidence?: JobEvidence
+  bundle: ContextBundle
 ): Promise<GenerateIdeasResult> {
   let geminiError: string | undefined;
+
+  // Log the bundle summary for every run
+  const summary = summarizeContextBundleForLogs(bundle);
+  console.log(`[ideas] context ${summary.line}`);
+  console.log(`[ideas] preview:\n${summary.preview}`);
 
   /* ── Strategy 1: Gemini SDK (preferred — rich context, JSON mode) ── */
   if (process.env.GEMINI_API_KEY) {
     try {
-      const ideas = await generateIdeasWithGemini(jobId, context, evidence);
+      const ideas = await generateIdeasWithGemini(jobId, bundle);
       return { ideas, provider: "gemini" };
     } catch (err) {
       geminiError =
@@ -151,9 +141,10 @@ export async function generateIdeas(
     }
   }
 
-  /* ── Strategy 2: OpenAI → Gemini REST ── */
-  const ctxStr = buildContextString(context, evidence);
-  const raw = await callLLM(IDEAS_SYSTEM, ctxStr);
+  /* ── Strategy 2: OpenAI → Gemini REST (same ContextBundle prompt) ── */
+  const ctxStr = contextBundleToPrompt(bundle);
+  const t0Rest = performance.now();
+  const raw = await callLLM(IDEAS_SYSTEM, ctxStr, "ideas");
 
   if (raw) {
     try {
@@ -174,8 +165,9 @@ export async function generateIdeas(
           },
           inspiredAngle: item.inspiredAngle || undefined,
         }));
-        // Determine which provider actually responded
         const provider = process.env.OPENAI_API_KEY ? "openai" : "gemini";
+        const durationMs = Math.round(performance.now() - t0Rest);
+        logGeminiCall("ideas", { durationMs, used: provider === "openai" ? "openai" : "gemini-rest", fallback: true });
         return { ideas, provider: provider as "openai" | "gemini", geminiError };
       }
     } catch {
@@ -184,11 +176,24 @@ export async function generateIdeas(
   }
 
   /* ── Strategy 3: Deterministic mock fallback ── */
+  const durationMs = Math.round(performance.now() - t0Rest);
+  logGeminiCall("ideas", { durationMs, used: "mock", fallback: true });
   return {
-    ideas: generateMockIdeas(jobId, context),
+    ideas: generateMockIdeas(jobId, { name: bundle.company.name, url: bundle.company.url }),
     provider: "mock",
     geminiError: geminiError || (process.env.GEMINI_API_KEY ? "LLM returned unparseable response" : undefined),
   };
+}
+
+/* ── Lightweight context string for build-plan generation (not used for ideas) ── */
+
+function buildContextString(ctx: CompanyContext): string {
+  const parts: string[] = [`Company: ${ctx.name}`];
+  if (ctx.url) parts.push(`Website: ${ctx.url}`);
+  if (ctx.description) parts.push(`Description: ${ctx.description}`);
+  if (ctx.industryHints?.length) parts.push(`Industry: ${ctx.industryHints.join(", ")}`);
+  if (ctx.headings?.length) parts.push(`Key headings: ${ctx.headings.slice(0, 10).join("; ")}`);
+  return parts.join("\n");
 }
 
 /* ══════════════════════════════════════════════
@@ -339,7 +344,7 @@ ${buildContextString(context)}`;
 
   let basePlan: BuildPlan;
 
-  const raw = await callLLM(STEPS_SYSTEM, userPrompt);
+  const raw = await callLLM(STEPS_SYSTEM, userPrompt, "steps");
 
   if (raw) {
     try {
@@ -398,7 +403,7 @@ export async function generateCustomIdeaPlan(
   const ctxStr = context ? `\n\nCompany context:\n${buildContextString(context)}` : "";
   const userPrompt = `Custom idea: ${text}${ctxStr}`;
 
-  const raw = await callLLM(CUSTOM_SYSTEM, userPrompt);
+  const raw = await callLLM(CUSTOM_SYSTEM, userPrompt, "steps");
 
   if (raw) {
     try {

@@ -2,10 +2,14 @@
    Used by the analyzer's "Reading key pages" step.
    Playwright is opt-in via ENABLE_PLAYWRIGHT=true. */
 
+import type { PageFetchAttempt } from "./types";
+
 export interface PageReadResult {
   url: string;
   ok: boolean;
   method: "fetch" | "playwright" | "none";
+  statusCode?: number;
+  failReason?: string;
   title?: string;
   metaDescription?: string;
   headings: string[];
@@ -29,29 +33,77 @@ function extractMetaDesc(h: string): string | undefined {
   const m =
     h.match(/<meta[^>]*name=["']description["'][^>]*content=["']([\s\S]*?)["']/i) ||
     h.match(/<meta[^>]*content=["']([\s\S]*?)["'][^>]*name=["']description["']/i);
-  return m ? m[1].trim() : undefined;
+  if (m) return m[1].trim();
+  const og =
+    h.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([\s\S]*?)["']/i) ||
+    h.match(/<meta[^>]*content=["']([\s\S]*?)["'][^>]*property=["']og:description["']/i);
+  return og ? og[1].trim() : undefined;
 }
 
 function extractHeadings(h: string): string[] {
   const out: string[] = [];
-  const re = /<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/gi;
+  const seen = new Set<string>();
+
+  // h1-h4 tags
+  const re = /<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/gi;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(h)) !== null && out.length < 20) {
+  while ((m = re.exec(h)) !== null && out.length < 25) {
     const t = strip(m[1]);
-    if (t.length > 2 && t.length < 200) out.push(t);
+    if (t.length > 2 && t.length < 200 && !seen.has(t.toLowerCase())) {
+      seen.add(t.toLowerCase());
+      out.push(t);
+    }
   }
+
+  // role="heading" elements
+  const roleRe = /role=["']heading["'][^>]*>([\s\S]*?)<\//gi;
+  while ((m = roleRe.exec(h)) !== null && out.length < 25) {
+    const t = strip(m[1]);
+    if (t.length > 2 && t.length < 200 && !seen.has(t.toLowerCase())) {
+      seen.add(t.toLowerCase());
+      out.push(t);
+    }
+  }
+
+  // If still very few headings, extract og:title as a signal
+  if (out.length < 2) {
+    const ogTitle =
+      h.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([\s\S]*?)["']/i) ||
+      h.match(/<meta[^>]*content=["']([\s\S]*?)["'][^>]*property=["']og:title["']/i);
+    if (ogTitle) {
+      const t = ogTitle[1].trim();
+      if (t.length > 2 && !seen.has(t.toLowerCase())) {
+        seen.add(t.toLowerCase());
+        out.unshift(t);
+      }
+    }
+  }
+
   return out;
 }
 
 function extractNavLabels(h: string): string[] {
   const labels: string[] = [];
   const navs = h.match(/<nav[^>]*>([\s\S]*?)<\/nav>/gi) ?? [];
-  for (const nav of navs.slice(0, 2)) {
+  for (const nav of navs.slice(0, 3)) {
     const re = /<a[^>]*>([\s\S]*?)<\/a>/gi;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(nav)) !== null && labels.length < 20) {
+    while ((m = re.exec(nav)) !== null && labels.length < 25) {
       const t = strip(m[1]);
       if (t.length > 1 && t.length < 50) labels.push(t);
+    }
+  }
+  // Also try header links if nav yielded nothing
+  if (labels.length === 0) {
+    const headerRe = /<header[^>]*>([\s\S]*?)<\/header>/gi;
+    const headers = [...h.matchAll(headerRe)];
+    for (const hdr of headers.slice(0, 1)) {
+      const re = /<a[^>]*>([\s\S]*?)<\/a>/gi;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(hdr[1])) !== null && labels.length < 20) {
+        const t = strip(m[1]);
+        if (t.length > 1 && t.length < 50) labels.push(t);
+      }
     }
   }
   return [...new Set(labels)];
@@ -63,6 +115,7 @@ function extractLinks(h: string, baseUrl: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(h)) !== null) {
     let href = m[1].trim();
+    if (href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:")) continue;
     if (href.startsWith("/")) {
       try {
         const b = new URL(baseUrl);
@@ -79,14 +132,14 @@ function extractLinks(h: string, baseUrl: string): string[] {
 function bodyTextLength(html: string): number {
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   const body = bodyMatch ? bodyMatch[1] : html;
-  // Strip scripts and styles first
   const clean = body
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, "");
   return strip(clean).length;
 }
 
-function parseHtml(html: string, url: string): Omit<PageReadResult, "ok" | "method"> {
+function parseHtml(html: string, url: string): Omit<PageReadResult, "ok" | "method" | "statusCode" | "failReason"> {
   return {
     url,
     title: extractTitle(html),
@@ -98,7 +151,7 @@ function parseHtml(html: string, url: string): Omit<PageReadResult, "ok" | "meth
   };
 }
 
-/* ── Stage A: fetch reader ── */
+/* ── Stage A: fetch reader (now tracks status codes) ── */
 
 async function fetchReader(url: string, timeoutMs = 8000): Promise<PageReadResult> {
   const empty: PageReadResult = {
@@ -115,21 +168,43 @@ async function fetchReader(url: string, timeoutMs = 8000): Promise<PageReadResul
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
       },
       redirect: "follow",
     });
     clearTimeout(t);
-    if (!res.ok) return empty;
+
+    if (!res.ok) {
+      const reason =
+        res.status === 403 ? "Blocked (403 Forbidden)" :
+        res.status === 404 ? "Not found (404)" :
+        res.status === 429 ? "Rate limited (429)" :
+        res.status >= 500 ? `Server error (${res.status})` :
+        `HTTP ${res.status}`;
+      return { ...empty, statusCode: res.status, failReason: reason };
+    }
+
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html") && !contentType.includes("xhtml")) {
+      return { ...empty, statusCode: res.status, failReason: `Non-HTML response (${contentType.split(";")[0]})` };
+    }
 
     const html = (await res.text()).slice(0, 300_000);
-    const parsed = parseHtml(html, url);
+    const parsed = parseHtml(html, res.url || url);
     return {
       ...parsed,
+      url: res.url || url,
       ok: true,
       method: "fetch",
+      statusCode: res.status,
     };
-  } catch {
-    return empty;
+  } catch (err) {
+    const reason = err instanceof Error && err.name === "AbortError"
+      ? `Timeout (${timeoutMs}ms)`
+      : err instanceof Error
+        ? err.message.slice(0, 80)
+        : "Unknown error";
+    return { ...empty, failReason: reason };
   }
 }
 
@@ -146,13 +221,11 @@ async function playwrightReader(url: string): Promise<PageReadResult> {
   if (!PLAYWRIGHT_ENABLED) return empty;
 
   try {
-    // Dynamic import to avoid requiring Playwright when not enabled
     const { chromium } = await import("playwright");
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage();
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
-      // Small wait for JS rendering
       await page.waitForTimeout(2000);
       const html = await page.content();
       const parsed = parseHtml(html.slice(0, 300_000), url);
@@ -168,7 +241,86 @@ async function playwrightReader(url: string): Promise<PageReadResult> {
 /* ── Thin-page detection ── */
 
 function isThinResult(r: PageReadResult): boolean {
-  return !r.ok || r.headings.length < 2 || r.textLen < 400;
+  return !r.ok || (r.headings.length < 2 && r.textLen < 400);
+}
+
+/* ── Common sub-page paths to probe when link discovery fails ── */
+
+const COMMON_KEY_PATHS = [
+  "/about", "/about-us", "/products", "/services",
+  "/features", "/solutions", "/platform", "/pricing",
+  "/company", "/who-we-are",
+];
+
+/**
+ * Probe common sub-page paths via HEAD then GET.
+ * Returns up to `max` successful page reads.
+ */
+async function probeCommonSubPages(
+  siteUrl: string,
+  max: number
+): Promise<{ pages: PageReadResult[]; attempts: PageFetchAttempt[] }> {
+  let origin: string;
+  try {
+    origin = new URL(siteUrl).origin;
+  } catch {
+    return { pages: [], attempts: [] };
+  }
+
+  const attempts: PageFetchAttempt[] = [];
+  const pages: PageReadResult[] = [];
+
+  // HEAD-probe all in parallel first
+  const headResults = await Promise.all(
+    COMMON_KEY_PATHS.map(async (path) => {
+      const url = `${origin}${path}`;
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 4000);
+        const res = await fetch(url, {
+          method: "HEAD",
+          signal: ctrl.signal,
+          redirect: "follow",
+          headers: {
+            "User-Agent": "Mozilla/5.0 (compatible; AmuseBouchenator/1.0)",
+            Accept: "text/html,*/*;q=0.8",
+          },
+        });
+        clearTimeout(timer);
+        return { url, ok: res.ok, status: res.status };
+      } catch {
+        return { url, ok: false, status: 0 };
+      }
+    })
+  );
+
+  // GET the first `max` that responded with 200
+  const okUrls = headResults.filter((r) => r.ok).slice(0, max);
+  for (const { url, status } of okUrls) {
+    const result = await fetchReader(url, 6000);
+    const attempt: PageFetchAttempt = {
+      url,
+      status: result.ok ? "ok" : "empty",
+      statusCode: result.statusCode ?? status,
+      headingCount: result.headings.length,
+      note: result.failReason,
+    };
+    attempts.push(attempt);
+    if (result.ok) pages.push(result);
+  }
+
+  // Record failed probes for evidence
+  for (const r of headResults) {
+    if (!r.ok && !attempts.some((a) => a.url === r.url)) {
+      attempts.push({
+        url: r.url,
+        status: r.status === 0 ? "timeout" : r.status === 403 ? "blocked" : r.status === 404 ? "not_found" : "error",
+        statusCode: r.status || undefined,
+      });
+    }
+  }
+
+  return { pages, attempts };
 }
 
 /* ── Public API ── */
@@ -184,55 +336,70 @@ export async function readPage(url: string): Promise<PageReadResult> {
     return fetchResult;
   }
 
-  // Only try Playwright if fetch returned thin content
   if (PLAYWRIGHT_ENABLED) {
     const pwResult = await playwrightReader(url);
     if (pwResult.ok && !isThinResult(pwResult)) {
       return pwResult;
     }
-    // If Playwright also thin, return whichever has more content
     if (pwResult.ok && pwResult.textLen > fetchResult.textLen) {
       return pwResult;
     }
   }
 
-  // Return fetch result (even if thin) — better than nothing
   return fetchResult;
 }
 
-/**
- * Read the homepage + up to 2 key sub-pages.
- * Cap Playwright fallback to 2 pages total for speed.
- */
-export async function readKeyPages(
-  siteUrl: string
-): Promise<{
+export interface KeyPagesResult {
   homepage: PageReadResult | null;
   keyPages: PageReadResult[];
   playwrightUsed: boolean;
   totalPages: number;
   totalHeadings: number;
-}> {
+  attempts: PageFetchAttempt[];
+  thinContent: boolean;
+  thinNote?: string;
+}
+
+/**
+ * Read the homepage + up to 3 key sub-pages.
+ * 1) Discover sub-pages from homepage links
+ * 2) If link discovery yields < 2 pages, probe common paths as fallback
+ * Tracks all fetch attempts for diagnostics.
+ */
+export async function readKeyPages(siteUrl: string): Promise<KeyPagesResult> {
   let playwrightUsed = false;
+  const attempts: PageFetchAttempt[] = [];
 
   // 1) Read homepage
   const home = await readPage(siteUrl);
   if (home.method === "playwright") playwrightUsed = true;
 
-  if (!home.ok) {
-    return { homepage: null, keyPages: [], playwrightUsed, totalPages: 0, totalHeadings: 0 };
-  }
+  attempts.push({
+    url: home.url || siteUrl,
+    status: home.ok ? "ok" : home.failReason?.includes("403") ? "blocked" :
+      home.failReason?.includes("404") ? "not_found" :
+      home.failReason?.includes("Timeout") ? "timeout" : "error",
+    statusCode: home.statusCode,
+    headingCount: home.headings.length,
+    note: home.failReason,
+  });
 
-  // 2) Discover key sub-pages from nav links
-  const KEY_RE = /\b(product|service|solution|pricing|about|features|platform|enterprise)\b/i;
-  const keyUrls = home.links.filter((l) => KEY_RE.test(l)).slice(0, 2);
+  // 2) Discover key sub-pages from homepage links (if homepage was OK)
+  const KEY_RE = /\b(product|service|solution|pricing|about|features|platform|enterprise|company)\b/i;
+  const keyUrls = home.ok ? home.links.filter((l) => KEY_RE.test(l)).slice(0, 3) : [];
 
-  // 3) Read sub-pages in parallel
   let pwCount = playwrightUsed ? 1 : 0;
   const keyPages: PageReadResult[] = [];
 
   for (const url of keyUrls) {
     const fetchResult = await fetchReader(url, 6000);
+    attempts.push({
+      url,
+      status: fetchResult.ok ? "ok" : fetchResult.failReason?.includes("403") ? "blocked" : "error",
+      statusCode: fetchResult.statusCode,
+      headingCount: fetchResult.headings.length,
+      note: fetchResult.failReason,
+    });
     if (!isThinResult(fetchResult)) {
       keyPages.push(fetchResult);
     } else if (PLAYWRIGHT_ENABLED && pwCount < 2) {
@@ -241,23 +408,59 @@ export async function readKeyPages(
         playwrightUsed = true;
         pwCount++;
         keyPages.push(pwResult);
-      } else {
-        // Use the fetch result (even if thin)
-        if (fetchResult.ok) keyPages.push(fetchResult);
+      } else if (fetchResult.ok) {
+        keyPages.push(fetchResult);
       }
     } else if (fetchResult.ok) {
       keyPages.push(fetchResult);
     }
   }
 
-  const allPages = [home, ...keyPages];
-  const totalHeadings = allPages.reduce((sum, p) => sum + p.headings.length, 0);
+  // 3) Fallback: if link discovery yielded < 2 sub-pages (or homepage failed), probe common paths
+  if (keyPages.length < 2) {
+    const needed = 3 - keyPages.length;
+    const existingUrls = new Set([siteUrl, ...keyUrls, ...keyPages.map((p) => p.url)]);
+    const { pages: probed, attempts: probeAttempts } = await probeCommonSubPages(siteUrl, needed);
+    for (const p of probed) {
+      if (!existingUrls.has(p.url)) {
+        keyPages.push(p);
+        existingUrls.add(p.url);
+      }
+    }
+    for (const a of probeAttempts) {
+      if (!attempts.some((ea) => ea.url === a.url)) {
+        attempts.push(a);
+      }
+    }
+  }
+
+  const successfulPages = home.ok ? [home, ...keyPages] : keyPages;
+  const totalHeadings = successfulPages.reduce((sum, p) => sum + p.headings.length, 0);
+
+  // Detect thin content + determine note
+  const thinContent = totalHeadings < 3 && (home.ok ? home.textLen < 500 : true);
+  let thinNote: string | undefined;
+  if (!home.ok) {
+    thinNote = home.failReason
+      ? `Homepage: ${home.failReason}`
+      : "Homepage returned no content";
+    if (keyPages.length > 0) {
+      thinNote += ` (but ${keyPages.length} sub-page(s) OK)`;
+    }
+  } else if (thinContent) {
+    thinNote = PLAYWRIGHT_ENABLED
+      ? "Content appears JS-rendered even after Playwright"
+      : "Content appears JS-rendered; try enabling Playwright (ENABLE_PLAYWRIGHT=true)";
+  }
 
   return {
-    homepage: home,
+    homepage: home.ok ? home : null,
     keyPages,
     playwrightUsed,
-    totalPages: allPages.length,
+    totalPages: successfulPages.length,
     totalHeadings,
+    attempts,
+    thinContent,
+    thinNote,
   };
 }

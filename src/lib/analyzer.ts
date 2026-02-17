@@ -3,7 +3,7 @@
    Collects evidence (timings, cache hits, discovered data) for observability. */
 
 import type { Job, AnalysisStep, CompanyContext, JobEvidence } from "./types";
-import { getJob, storeIdea } from "./jobStore";
+import { getJob, storeIdea, persistJob } from "./jobStore";
 import {
   isUrl,
   normalizeUrl,
@@ -19,6 +19,7 @@ import { buildInspirationPack } from "./inspirationPack";
 import { fetchGdeltNews } from "./gdelt";
 import { generateIdeas } from "./ai";
 import type { GenerateIdeasResult } from "./ai";
+import { buildContextBundle } from "./contextBundle";
 import { getCompanyTheme } from "./themeSampler";
 import { isThemeCached } from "./themeSampler";
 import { getWikidataProfile } from "./enrichment/wikidata";
@@ -210,9 +211,12 @@ export async function runAnalysis(jobId: string): Promise<void> {
     t0 = performance.now();
     setStep(job, "pages", "running");
     log.start("pages");
+    ev.resolvedBaseUrl = ctx.url;
     if (ctx.url) {
       try {
         const result = await readKeyPages(ctx.url);
+        ev.pageFetchAttempts = result.attempts;
+
         if (result.homepage) {
           if (!ctx.description) {
             ctx.description = result.homepage.metaDescription;
@@ -220,7 +224,7 @@ export async function runAnalysis(jobId: string): Promise<void> {
           ctx.headings = [
             ...result.homepage.headings,
             ...result.keyPages.flatMap((p) => p.headings),
-          ].slice(0, 20);
+          ].slice(0, 25);
           ctx.navLabels = result.homepage.navLabels;
           ev.keyPages = [
             result.homepage.url,
@@ -229,17 +233,26 @@ export async function runAnalysis(jobId: string): Promise<void> {
         }
 
         const methodNote = result.playwrightUsed
-          ? "Rendered with Playwright fallback"
-          : "Fetched HTML";
+          ? "Playwright fallback"
+          : "fetch";
+        const okCount = result.attempts.filter((a) => a.status === "ok").length;
+        const blockedCount = result.attempts.filter((a) => a.status === "blocked").length;
         const countNote = `${result.totalPages} page(s), ${result.totalHeadings} heading(s)`;
 
-        if (ctx.headings?.length) {
-          setStep(job, "pages", "done", `${methodNote} — ${countNote}`);
-          log.info("pages", `${log.ms(t0)} → ${methodNote} — ${countNote}`);
+        if (result.thinContent && result.thinNote) {
+          const stepNote = result.totalPages > 0
+            ? `${countNote} via ${methodNote} — ${result.thinNote}`
+            : result.thinNote;
+          setStep(job, "pages", result.totalPages > 0 ? "done" : "done", stepNote);
+          log.warn("pages", `${log.ms(t0)} → ${stepNote}`);
+        } else if (ctx.headings?.length) {
+          setStep(job, "pages", "done", `${countNote} via ${methodNote}`);
+          log.info("pages", `${log.ms(t0)} → ${countNote} via ${methodNote}`);
         } else {
-          setStep(job, "pages", "done", `${methodNote} — ${countNote} (thin content)`);
-          log.warn("pages", `${log.ms(t0)} → ${methodNote} — ${countNote} (thin content)`);
+          setStep(job, "pages", "done", `${countNote} via ${methodNote} (no headings found)`);
+          log.warn("pages", `${log.ms(t0)} → ${countNote} via ${methodNote} (no headings)`);
         }
+        log.info("pages", `attempted=${result.attempts.length} ok=${okCount} blocked=${blockedCount} thinContent=${result.thinContent}`);
       } catch (err) {
         setStep(job, "pages", "skipped", "Page read failed");
         log.warn("pages", `${log.ms(t0)} → failed: ${err instanceof Error ? err.message : "unknown"}`);
@@ -304,19 +317,26 @@ export async function runAnalysis(jobId: string): Promise<void> {
           if (!ev.pressLinks.includes(pp.url)) ev.pressLinks.push(pp.url);
         }
 
+        // Filter out non-HTML asset URLs from pressLinks
+        const assetRe = /\.(css|js|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico|webp|avif|mp4|mp3|pdf|zip)(\?|$)/i;
+        ev.pressLinks = ev.pressLinks.filter((u) => {
+          try { return !assetRe.test(new URL(u).pathname); } catch { return true; }
+        });
+
         if (pressHeadings.length) {
           ctx.pressHeadlines = pressHeadings;
         }
 
+        const headlineCount = pressHeadings.length;
         setStep(
           job,
           "press",
           ev.pressLinks.length > 0 ? "done" : "skipped",
           ev.pressLinks.length > 0
-            ? `Found ${ev.pressLinks.length} press URL(s)`
+            ? `${ev.pressLinks.length} URL(s), ${headlineCount} headline(s)`
             : undefined
         );
-        log.info("press", `${log.ms(t0)} → ${ev.pressLinks.length} URL(s), ${pressHeadings.length} headline(s)`);
+        log.info("press", `${log.ms(t0)} → ${ev.pressLinks.length} URL(s), ${headlineCount} headline(s)`);
       } catch {
         setStep(job, "press", "skipped");
         log.warn("press", `${log.ms(t0)} → fetch failed`);
@@ -328,29 +348,61 @@ export async function runAnalysis(jobId: string): Promise<void> {
     await enforceMinDuration(t0);
     ev.timingsMs.press = Math.round(performance.now() - t0);
 
-    /* ── Step 6: External news (GDELT) ── */
+    /* ── Step 6: External news (GDELT + press headline fallback) ── */
     t0 = performance.now();
     setStep(job, "news", "running");
     log.start("news");
+
+    const newsAttempts: import("./types").NewsFetchAttempt[] = [];
+    let gdeltCount = 0;
+    const pressHeadlineCount = ctx.pressHeadlines?.length ?? 0;
+
     try {
       const domain = domainFromUrl(ctx.url);
       const articles = await fetchGdeltNews(ctx.name, domain);
-      ev.news = { provider: "GDELT", count: articles.length, items: articles };
+      gdeltCount = articles.length;
+      newsAttempts.push({ source: "gdelt", count: gdeltCount, note: gdeltCount > 0 ? undefined : "No articles matched" });
+
       if (articles.length > 0) {
+        ev.news = { provider: "GDELT", count: articles.length, items: articles };
         ctx.newsItems = articles.map((a) => a.title);
-        setStep(job, "news", "done", `Found ${articles.length} article(s) via GDELT`);
-        log.info("news", `${log.ms(t0)} → GDELT: ${articles.length} article(s)`);
       } else {
-        const fallbackNote = ev.pressLinks.length > 0
-          ? "No GDELT headlines found; using press releases only"
-          : "No recent articles found";
-        setStep(job, "news", "skipped", fallbackNote);
-        log.warn("news", `${log.ms(t0)} → GDELT: 0 articles${ev.pressLinks.length > 0 ? " (using press releases)" : ""}`);
+        ev.news = { provider: "GDELT", count: 0, items: [] };
       }
-    } catch {
-      setStep(job, "news", "skipped", "GDELT lookup failed");
-      log.error("news", `${log.ms(t0)} → GDELT lookup failed`);
+
+      // Fallback: if GDELT returned 0, use press headlines as news items
+      if (articles.length === 0 && pressHeadlineCount > 0) {
+        ctx.newsItems = ctx.pressHeadlines!.slice(0, 5);
+        newsAttempts.push({ source: "press-headlines", count: pressHeadlineCount, note: "Used as GDELT fallback" });
+      }
+
+      // Determine status note
+      const totalNews = (ctx.newsItems?.length ?? 0);
+      if (totalNews > 0) {
+        const sourceNote = gdeltCount > 0
+          ? `${gdeltCount} article(s) via GDELT`
+          : `${pressHeadlineCount} headline(s) from press pages (GDELT returned 0)`;
+        setStep(job, "news", "done", sourceNote);
+        log.info("news", `${log.ms(t0)} → ${sourceNote}`);
+      } else {
+        const triedDomain = domain ? ` (domain: ${domain})` : "";
+        setStep(job, "news", "done", `0 found — tried GDELT${triedDomain}${pressHeadlineCount > 0 ? " + press" : ""}`);
+        log.warn("news", `${log.ms(t0)} → 0 articles — GDELT=0${triedDomain}, pressHeadlines=${pressHeadlineCount}`);
+      }
+    } catch (err) {
+      newsAttempts.push({ source: "gdelt", count: 0, note: `Failed: ${err instanceof Error ? err.message : "unknown"}` });
+      // Still try press headlines
+      if (pressHeadlineCount > 0) {
+        ctx.newsItems = ctx.pressHeadlines!.slice(0, 5);
+        newsAttempts.push({ source: "press-headlines", count: pressHeadlineCount, note: "GDELT failed, using press" });
+        setStep(job, "news", "done", `${pressHeadlineCount} headline(s) from press (GDELT failed)`);
+        log.warn("news", `${log.ms(t0)} → GDELT failed, using ${pressHeadlineCount} press headlines`);
+      } else {
+        setStep(job, "news", "done", "0 found — GDELT failed, no press headlines available");
+        log.error("news", `${log.ms(t0)} → GDELT failed, no press fallback`);
+      }
     }
+    ev.newsFetchAttempts = newsAttempts;
     await enforceMinDuration(t0);
     ev.timingsMs.news = Math.round(performance.now() - t0);
 
@@ -412,13 +464,16 @@ export async function runAnalysis(jobId: string): Promise<void> {
     await enforceMinDuration(t0);
     ev.timingsMs.producthunt = Math.round(performance.now() - t0);
 
-    /* ── Step 8: Generate ideas ── */
+    /* ── Step 8: Generate ideas (via ContextBundle — single source of truth) ── */
     t0 = performance.now();
     setStep(job, "generate", "running");
     log.start("generate");
     job.companyContext = ctx;
 
-    const genResult: GenerateIdeasResult = await generateIdeas(jobId, ctx, ev);
+    const bundle = buildContextBundle(ctx, ev, job.theme);
+    job.contextBundle = bundle;
+
+    const genResult: GenerateIdeasResult = await generateIdeas(jobId, bundle);
     const ideas = genResult.ideas;
 
     ev.usedGemini = genResult.provider === "gemini";
@@ -446,7 +501,13 @@ export async function runAnalysis(jobId: string): Promise<void> {
     ev.timingsMs.generate = Math.round(performance.now() - t0);
 
     job.status = "done";
-    log.info("done", `Pipeline complete — ${Object.values(ev.timingsMs).reduce((a, b) => a + b, 0)}ms total`);
+    persistJob(job.id);
+    const totalMs = Object.values(ev.timingsMs).reduce((a, b) => a + b, 0);
+    const pagesOk = ev.pageFetchAttempts?.filter((a) => a.status === "ok").length ?? ev.keyPages.length;
+    const pagesBlocked = ev.pageFetchAttempts?.filter((a) => a.status === "blocked").length ?? 0;
+    const pagesAttempted = ev.pageFetchAttempts?.length ?? ev.keyPages.length;
+    console.log(`[analyze] keyPages attempted=${pagesAttempted} ok=${pagesOk} blocked=${pagesBlocked} thinContent=${(ctx.headings?.length ?? 0) < 3} news gdelt=${ev.news.count} pressHeadlines=${ctx.pressHeadlines?.length ?? 0}`);
+    log.info("done", `Pipeline complete — ${totalMs}ms total`);
   } catch (err) {
     job.status = "failed";
     for (const s of job.steps) {

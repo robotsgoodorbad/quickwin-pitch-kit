@@ -20,5 +20,6 @@ export async function GET(
     companyContext: job.companyContext,
     theme: job.theme ?? null,
     evidence: job.evidence ?? null,
+    contextBundle: job.contextBundle ?? null,
   });
 }

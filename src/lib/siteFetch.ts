@@ -115,11 +115,24 @@ const PRESS_RE = /\b(press|newsroom|news|media|announcement|blog|stories)\b/i;
 /** Common press/newsroom paths to probe when homepage links don't yield results. */
 const PRESS_PATHS = ["/news", "/newsroom", "/press", "/press-releases", "/media", "/blog"];
 
+/** File extensions that are definitely NOT press/news pages. */
+const ASSET_EXT_RE = /\.(css|js|json|xml|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|ico|webp|avif|mp4|mp3|pdf|zip|tar|gz)(\?|$)/i;
+
+/** Filter out URLs that are clearly assets (fonts, CSS, images, etc.) */
+function isHtmlLikeUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url).pathname;
+    return !ASSET_EXT_RE.test(pathname);
+  } catch {
+    return !ASSET_EXT_RE.test(url);
+  }
+}
+
 /**
  * Best-effort press URL discovery:
- * 1) Homepage links matching PRESS_RE
- * 2) Probe common paths (HEAD request)
- * 3) Sitemap.xml URLs containing press/news/blog
+ * 1) Probe common paths (HEAD request)
+ * 2) Sitemap.xml URLs containing press/news/blog
+ * Filters out non-HTML asset URLs.
  */
 export async function discoverPressUrls(siteUrl: string): Promise<string[]> {
   const found: Set<string> = new Set();
@@ -144,7 +157,12 @@ export async function discoverPressUrls(siteUrl: string): Promise<string[]> {
           headers: { "User-Agent": "Mozilla/5.0 (compatible; AmuseBouchenator/1.0)" },
         });
         clearTimeout(timer);
-        if (res.ok) found.add(u);
+        if (res.ok) {
+          const ct = res.headers.get("content-type") ?? "";
+          if (ct.includes("text/html") || ct.includes("xhtml") || !ct) {
+            found.add(u);
+          }
+        }
       } catch {
         /* skip */
       }
@@ -160,7 +178,7 @@ export async function discoverPressUrls(siteUrl: string): Promise<string[]> {
       let count = 0;
       while ((m = locRe.exec(sitemapText)) !== null && count < 20) {
         const loc = m[1].trim();
-        if (PRESS_RE.test(loc)) {
+        if (PRESS_RE.test(loc) && isHtmlLikeUrl(loc)) {
           found.add(loc);
           count++;
         }
@@ -170,7 +188,7 @@ export async function discoverPressUrls(siteUrl: string): Promise<string[]> {
     /* skip */
   }
 
-  return [...found].slice(0, 15);
+  return [...found].filter(isHtmlLikeUrl).slice(0, 15);
 }
 
 /* ── public API ── */
@@ -185,7 +203,7 @@ export async function fetchSiteData(url: string): Promise<SiteData> {
 
   const allLinks = result.homepage.links;
   const keyUrls = allLinks.filter((l) => KEY_RE.test(l)).slice(0, 4);
-  const pressUrls = allLinks.filter((l) => PRESS_RE.test(l)).slice(0, 2);
+  const pressUrls = allLinks.filter((l) => PRESS_RE.test(l) && isHtmlLikeUrl(l)).slice(0, 2);
 
   const [keyPages, pressPages] = await Promise.all([
     Promise.all(
@@ -207,12 +225,27 @@ export async function fetchSiteData(url: string): Promise<SiteData> {
   return result;
 }
 
+/** Tracking / analytics params to strip from URLs */
+const TRACKING_PARAMS = new Set([
+  "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+  "fbclid", "gclid", "gclsrc", "dclid", "msclkid",
+  "ref", "source", "mc_cid", "mc_eid",
+]);
+
 export function normalizeUrl(input: string): string {
   let url = input.trim();
   if (!url.startsWith("http://") && !url.startsWith("https://")) url = `https://${url}`;
   try {
     const p = new URL(url);
-    return p.pathname === "/" || !p.pathname ? `${p.protocol}//${p.host}/` : url;
+    // Strip tracking params
+    for (const key of [...p.searchParams.keys()]) {
+      if (TRACKING_PARAMS.has(key.toLowerCase())) p.searchParams.delete(key);
+    }
+    // Normalize trailing slash for root paths
+    if (p.pathname === "/" || !p.pathname) {
+      return `${p.protocol}//${p.host}/${p.search ? p.search : ""}`.replace(/\/$/, "/");
+    }
+    return p.toString();
   } catch {
     return url;
   }

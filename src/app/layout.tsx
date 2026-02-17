@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Amuse Bouchenator",
   description:
-    "Taster-menu generator for quick-win prototypes — with Cursor-ready build steps.",
+    "Fresh app ideas, served daily—Cursor-ready build steps included.",
 };
 
 export default function RootLayout({
