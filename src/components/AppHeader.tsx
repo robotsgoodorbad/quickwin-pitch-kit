@@ -28,7 +28,13 @@ function ClocheIcon({ className = "" }: { className?: string }) {
   );
 }
 
-export default function AppHeader({ onReset }: { onReset?: () => void } = {}) {
+export default function AppHeader({
+  showStartOver = true,
+  onReset,
+}: {
+  showStartOver?: boolean;
+  onReset?: () => void;
+} = {}) {
   return (
     <header className="border-b border-zinc-200 bg-white">
       <div className="mx-auto max-w-5xl px-6 py-6">
@@ -47,20 +53,22 @@ export default function AppHeader({ onReset }: { onReset?: () => void } = {}) {
               </p>
             </div>
           </div>
-          {onReset ? (
-            <button
-              onClick={onReset}
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 transition-colors flex-shrink-0"
-            >
-              Start over
-            </button>
-          ) : (
-            <Link
-              href="/"
-              className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 transition-colors flex-shrink-0"
-            >
-              Start over
-            </Link>
+          {showStartOver && (
+            onReset ? (
+              <button
+                onClick={onReset}
+                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 transition-colors flex-shrink-0"
+              >
+                Start over
+              </button>
+            ) : (
+              <Link
+                href="/"
+                className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 transition-colors flex-shrink-0"
+              >
+                Start over
+              </Link>
+            )
           )}
         </div>
       </div>

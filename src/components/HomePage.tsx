@@ -803,7 +803,7 @@ export default function HomePage() {
       {state === "input" && <HomeHeroPattern />}
 
       <div className="relative z-10">
-        <AppHeader onReset={reset} />
+        <AppHeader showStartOver={state !== "input"} onReset={state !== "input" ? reset : undefined} />
       </div>
 
       <main className="relative z-10 mx-auto max-w-5xl px-6 py-10">
