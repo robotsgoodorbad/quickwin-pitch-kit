@@ -796,18 +796,15 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                     {copiedTerminal ? "\u2713 Copied to clipboard" : "Copy Terminal Commands"}
                   </button>
 
-                  <div className="mt-3 text-xs text-zinc-500">
+                  <p className="mt-3 text-sm text-zinc-600">
+                    If create-next-app asks &quot;Would you like to use React Compiler?&quot;, choose No.
+                  </p>
+
+                  <div className="mt-2 text-xs text-zinc-500">
                     <span className="font-semibold text-zinc-600">Done looks like:</span>
                     <p className="mt-1 leading-relaxed">
-                      &bull; Dev server running at http://localhost:3000<br />
-                      &bull; You see the default Next.js welcome page<br />
-                      &bull; Open the new folder in Cursor (File &rarr; Open Folder)
-                    </p>
-                  </div>
-
-                  <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
-                    <p className="text-xs text-amber-800">
-                      <span className="font-semibold">Note:</span> If <code className="font-mono">create-next-app</code> asks questions, accept all defaults (Yes to everything).
+                      &bull; Dev server running at a local URL (shown in your terminal &mdash; usually http://localhost:3000, or the next available port)<br />
+                      &bull; You see the default Next.js welcome page
                     </p>
                   </div>
                 </div>
