@@ -80,6 +80,8 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [copiedTerminal, setCopiedTerminal] = useState(false);
   const [copiedTheme, setCopiedTheme] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+  const [bmadOpen, setBmadOpen] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [usedProvider, setUsedProvider] = useState<"gemini" | "fallback" | "cache" | null>(null);
   const [planError, setPlanError] = useState(false);
@@ -214,6 +216,12 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
     navigator.clipboard.writeText(text).catch(() => {});
     setCopiedTerminal(true);
     setTimeout(() => setCopiedTerminal(false), 2000);
+  };
+
+  const copyCmd = (text: string, key: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+    setCopiedCmd(key);
+    setTimeout(() => setCopiedCmd(null), 2000);
   };
 
   /* ── Re-generate custom idea ── */
@@ -560,7 +568,28 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
 
               {/* ── Meet your BMAD team ── */}
               <section className="rounded-xl border border-zinc-200 bg-white p-6">
-                <h3 className="text-base font-semibold text-zinc-900 mb-3">Meet your BMAD team</h3>
+                <div className="flex items-center gap-2 mb-3">
+                  <h3 className="text-base font-semibold text-zinc-900">Meet your BMAD team</h3>
+                  <div
+                    className="relative"
+                    onMouseEnter={() => setBmadOpen(true)}
+                    onMouseLeave={() => setBmadOpen(false)}
+                  >
+                    <button
+                      onClick={() => setBmadOpen((v) => !v)}
+                      className="flex items-center justify-center h-5 w-5 rounded-full bg-zinc-100 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-200 transition-colors text-[10px] font-bold leading-none"
+                      aria-label="What is BMAD?"
+                    >
+                      ?
+                    </button>
+                    {bmadOpen && (
+                      <div className="absolute left-1/2 -translate-x-1/2 top-7 z-20 w-64 rounded-lg bg-white border border-zinc-200 shadow-lg p-3 text-xs text-zinc-600 leading-relaxed">
+                        <p className="font-semibold text-zinc-700 mb-1">BMAD = Build &middot; Measure &middot; Architect &middot; Deliver</p>
+                        <p>This is your structured build team. Each role represents a different mindset guiding your app from idea to production.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <p className="text-sm text-zinc-600 mb-4 leading-relaxed">
                   Each step below uses a &quot;BMAD role&quot; — it tells Cursor what kind of expert to be. Here&apos;s who&apos;s who:
                 </p>
@@ -581,10 +610,9 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
               </section>
 
               {/* ── Pre-step: Get your laptop ready ── */}
-              <section className="rounded-xl border-2 border-emerald-200 bg-white p-6">
-                <div className="flex items-center gap-2 mb-4">
+              <section className="rounded-xl border-2 border-emerald-200 bg-white p-6 space-y-6">
+                <div className="flex items-center gap-2">
                   <span className="flex items-center justify-center h-7 w-7 rounded-full bg-emerald-100 text-emerald-700">
-                    {/* Laptop icon */}
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                       <rect x="3" y="4" width="18" height="12" rx="2" />
                       <path d="M2 20h20" />
@@ -593,70 +621,195 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                   <h3 className="text-base font-semibold text-zinc-900">Get your laptop ready</h3>
                 </div>
 
-                <p className="text-sm text-zinc-600 leading-relaxed mb-1">
-                  We&apos;ll run a few commands in Cursor&apos;s Terminal to create the project.
-                  This is a one-time setup — takes about 2 minutes.
-                </p>
-                <p className="text-xs text-zinc-500 mb-4">
-                  In Cursor: <strong>View &rarr; Terminal</strong> (or click the bottom panel).
-                </p>
-
-                {/* Quick check */}
-                <div className="rounded-lg bg-zinc-50 border border-zinc-200 p-4 mb-4">
-                  <p className="text-sm font-medium text-zinc-700 mb-2">Quick check (takes 10 seconds):</p>
-                  <div className="rounded-lg bg-zinc-950 px-4 py-3 font-mono text-sm">
-                    <p className="text-emerald-400">node -v</p>
-                    <p className="text-emerald-400">npm -v</p>
+                {/* ── A: Create Your Project Folder ── */}
+                <div>
+                  <h4 className="text-sm font-semibold text-zinc-800 mb-2">Create your project folder</h4>
+                  <p className="text-sm text-zinc-600 leading-relaxed mb-3">
+                    Manually create a folder on your Desktop called:
+                  </p>
+                  <div className="rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
+                    <code className="text-emerald-400 text-sm font-mono">{idea.title}</code>
+                    <button
+                      onClick={() => copyCmd(idea.title, "folder")}
+                      className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                        copiedCmd === "folder" ? "bg-emerald-600 text-white" : "ab-btn-primary"
+                      }`}
+                    >
+                      {copiedCmd === "folder" ? "\u2713 Copied!" : "Copy"}
+                    </button>
                   </div>
-                  <p className="text-xs text-zinc-600 mt-2">
-                    If you see version numbers (e.g. <code className="text-xs bg-zinc-100 px-1 rounded">v20.11.0</code>), you&apos;re good.
-                  </p>
-                  <p className="text-xs text-zinc-500 mt-1">
-                    If not, install <a href="https://nodejs.org" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium">Node.js LTS</a>, then come back.
-                  </p>
-                </div>
-
-                {/* Create project */}
-                <p className="text-sm font-medium text-zinc-700 mb-2">
-                  Now create your project. Paste this into Cursor&apos;s terminal:
-                </p>
-
-                <div className="relative rounded-lg bg-zinc-950 p-4 font-mono text-sm">
-                  <div className="flex items-center gap-2 mb-3 text-zinc-500 text-xs">
-                    <span className="h-3 w-3 rounded-full bg-red-500/60" />
-                    <span className="h-3 w-3 rounded-full bg-yellow-500/60" />
-                    <span className="h-3 w-3 rounded-full bg-green-500/60" />
-                    <span className="ml-2">Terminal</span>
+                  <div className="mt-3 text-sm text-zinc-600 space-y-1.5">
+                    <p>Open <strong>Cursor</strong> &rarr; <strong>Open Folder</strong> &rarr; select that folder.</p>
+                    <p>Then open the terminal: <strong>View &rarr; Terminal</strong></p>
                   </div>
-                  <pre className="text-emerald-400 whitespace-pre-wrap leading-relaxed text-xs">
-                    {plan.terminalSetup}
-                  </pre>
                 </div>
 
-                <button
-                  onClick={() => copyTerminal(plan.terminalSetup)}
-                  className={`mt-3 w-full rounded-lg py-3 text-sm font-semibold transition-colors ${
-                    copiedTerminal
-                      ? "bg-emerald-600 text-white"
-                      : "ab-btn-primary"
-                  }`}
-                >
-                  {copiedTerminal ? "\u2713 Copied to clipboard" : "Copy Terminal Commands"}
-                </button>
+                <hr className="border-zinc-200" />
 
-                <div className="mt-3 text-xs text-zinc-500">
-                  <span className="font-semibold text-zinc-600">Done looks like:</span>
-                  <p className="mt-1 leading-relaxed">
-                    • Dev server running at http://localhost:3000<br />
-                    • You see the default Next.js welcome page<br />
-                    • Open the new folder in Cursor (File &rarr; Open Folder)
-                  </p>
+                {/* ── B: Node Installation ── */}
+                <div>
+                  <h4 className="text-sm font-semibold text-zinc-800 mb-3">Install Node.js</h4>
+
+                  {/* Accordion: Already have Node? */}
+                  <details className="group rounded-lg border border-zinc-200 bg-zinc-50 mb-4">
+                    <summary className="cursor-pointer select-none list-none px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-zinc-700">Already have Node installed?</span>
+                        <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </summary>
+                    <div className="px-4 pb-4 space-y-3">
+                      <p className="text-xs font-medium text-zinc-500">Let&apos;s check if Node is already installed</p>
+                      <p className="text-xs text-zinc-500 leading-relaxed">
+                        If you see a version number, you can skip the install steps below and proceed to &quot;Create your project.&quot; If you get &quot;command not found,&quot; follow the Homebrew + Node install steps below.
+                      </p>
+                      <div className="rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
+                        <code className="text-emerald-400 text-sm font-mono">node -v</code>
+                        <button
+                          onClick={() => copyCmd("node -v", "node-check")}
+                          className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                            copiedCmd === "node-check" ? "bg-emerald-600 text-white" : "ab-btn-primary"
+                          }`}
+                        >
+                          {copiedCmd === "node-check" ? "\u2713 Copied!" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+                  </details>
+
+                  {/* Default install flow */}
+                  <div className="space-y-4">
+                    {/* 1. Install Homebrew */}
+                    <div>
+                      <p className="text-sm font-medium text-zinc-700 mb-2">1. Install Homebrew</p>
+                      <div className="rounded-lg bg-zinc-950 px-4 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <code className="text-emerald-400 text-xs font-mono leading-relaxed break-all">
+                            {'/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'}
+                          </code>
+                          <button
+                            onClick={() => copyCmd('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"', "brew-install")}
+                            className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                              copiedCmd === "brew-install" ? "bg-emerald-600 text-white" : "ab-btn-primary"
+                            }`}
+                          >
+                            {copiedCmd === "brew-install" ? "\u2713 Copied!" : "Copy"}
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-zinc-500 mt-2">You may be asked for your Mac password. That&apos;s normal.</p>
+                      <p className="text-xs text-zinc-500 mt-1">Homebrew may prompt you to install Apple Command Line Tools &mdash; click <strong>Install</strong>, then come back here.</p>
+                    </div>
+
+                    {/* 2. Activate Homebrew */}
+                    <div>
+                      <p className="text-sm font-medium text-zinc-700 mb-2">2. Activate Homebrew</p>
+                      <div className="rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
+                        <code className="text-emerald-400 text-sm font-mono break-all">{'eval "$(/opt/homebrew/bin/brew shellenv)"'}</code>
+                        <button
+                          onClick={() => copyCmd('eval "$(/opt/homebrew/bin/brew shellenv)"', "brew-activate")}
+                          className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                            copiedCmd === "brew-activate" ? "bg-emerald-600 text-white" : "ab-btn-primary"
+                          }`}
+                        >
+                          {copiedCmd === "brew-activate" ? "\u2713 Copied!" : "Copy"}
+                        </button>
+                      </div>
+                      <p className="text-xs text-zinc-500 mt-2">If the first command fails, your Mac may be Intel &mdash; try this instead:</p>
+                      <div className="mt-1.5 rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
+                        <code className="text-emerald-400 text-sm font-mono break-all">{'eval "$(/usr/local/bin/brew shellenv)"'}</code>
+                        <button
+                          onClick={() => copyCmd('eval "$(/usr/local/bin/brew shellenv)"', "brew-activate-intel")}
+                          className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                            copiedCmd === "brew-activate-intel" ? "bg-emerald-600 text-white" : "ab-btn-primary"
+                          }`}
+                        >
+                          {copiedCmd === "brew-activate-intel" ? "\u2713 Copied!" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 3. Install Node */}
+                    <div>
+                      <p className="text-sm font-medium text-zinc-700 mb-2">3. Install Node</p>
+                      <div className="rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
+                        <code className="text-emerald-400 text-sm font-mono">brew install node</code>
+                        <button
+                          onClick={() => copyCmd("brew install node", "brew-node")}
+                          className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                            copiedCmd === "brew-node" ? "bg-emerald-600 text-white" : "ab-btn-primary"
+                          }`}
+                        >
+                          {copiedCmd === "brew-node" ? "\u2713 Copied!" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 4. Confirm installation */}
+                    <div>
+                      <p className="text-sm font-medium text-zinc-700 mb-2">4. Confirm installation</p>
+                      <div className="rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
+                        <code className="text-emerald-400 text-sm font-mono">node -v</code>
+                        <button
+                          onClick={() => copyCmd("node -v", "node-confirm")}
+                          className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                            copiedCmd === "node-confirm" ? "bg-emerald-600 text-white" : "ab-btn-primary"
+                          }`}
+                        >
+                          {copiedCmd === "node-confirm" ? "\u2713 Copied!" : "Copy"}
+                        </button>
+                      </div>
+                      <p className="text-xs text-zinc-500 mt-2">If a version number appears, you&apos;re ready to build.</p>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
-                  <p className="text-xs text-amber-800">
-                    <span className="font-semibold">Note:</span> If <code className="font-mono">create-next-app</code> asks questions, accept all defaults (Yes to everything).
-                  </p>
+                <hr className="border-zinc-200" />
+
+                {/* ── Create your project ── */}
+                <div>
+                  <h4 className="text-sm font-semibold text-zinc-800 mb-2">Create your project</h4>
+                  <p className="text-sm text-zinc-600 mb-3">Paste this into Cursor&apos;s terminal:</p>
+
+                  <div className="relative rounded-lg bg-zinc-950 p-4 font-mono text-sm">
+                    <div className="flex items-center gap-2 mb-3 text-zinc-500 text-xs">
+                      <span className="h-3 w-3 rounded-full bg-red-500/60" />
+                      <span className="h-3 w-3 rounded-full bg-yellow-500/60" />
+                      <span className="h-3 w-3 rounded-full bg-green-500/60" />
+                      <span className="ml-2">Terminal</span>
+                    </div>
+                    <pre className="text-emerald-400 whitespace-pre-wrap leading-relaxed text-xs">
+                      {plan.terminalSetup}
+                    </pre>
+                  </div>
+
+                  <button
+                    onClick={() => copyTerminal(plan.terminalSetup)}
+                    className={`mt-3 w-full rounded-lg py-3 text-sm font-semibold transition-colors ${
+                      copiedTerminal
+                        ? "bg-emerald-600 text-white"
+                        : "ab-btn-primary"
+                    }`}
+                  >
+                    {copiedTerminal ? "\u2713 Copied to clipboard" : "Copy Terminal Commands"}
+                  </button>
+
+                  <div className="mt-3 text-xs text-zinc-500">
+                    <span className="font-semibold text-zinc-600">Done looks like:</span>
+                    <p className="mt-1 leading-relaxed">
+                      &bull; Dev server running at http://localhost:3000<br />
+                      &bull; You see the default Next.js welcome page<br />
+                      &bull; Open the new folder in Cursor (File &rarr; Open Folder)
+                    </p>
+                  </div>
+
+                  <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+                    <p className="text-xs text-amber-800">
+                      <span className="font-semibold">Note:</span> If <code className="font-mono">create-next-app</code> asks questions, accept all defaults (Yes to everything).
+                    </p>
+                  </div>
                 </div>
               </section>
 
