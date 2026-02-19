@@ -621,9 +621,9 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                   <h3 className="text-base font-semibold text-zinc-900">Get your laptop ready</h3>
                 </div>
 
-                {/* ── A: Create Your Project Folder ── */}
+                {/* ── 1: Create Your Project Folder ── */}
                 <div>
-                  <h4 className="text-sm font-semibold text-zinc-800 mb-2">Create your project folder</h4>
+                  <h4 className="text-sm font-semibold text-zinc-800 mb-2">1) Create your project folder</h4>
                   <p className="text-sm text-zinc-600 leading-relaxed mb-3">
                     Manually create a folder on your Desktop called:
                   </p>
@@ -640,50 +640,48 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                   </div>
                   <div className="mt-3 text-sm text-zinc-600 space-y-1.5">
                     <p>Open <strong>Cursor</strong> &rarr; <strong>Open Folder</strong> &rarr; select that folder.</p>
-                    <p>Then open the terminal: <strong>View &rarr; Terminal</strong></p>
                   </div>
                 </div>
 
                 <hr className="border-zinc-200" />
 
-                {/* ── B: Node Installation ── */}
+                {/* ── 2: Open the Terminal ── */}
                 <div>
-                  <h4 className="text-sm font-semibold text-zinc-800 mb-3">Install Node.js</h4>
+                  <h4 className="text-sm font-semibold text-zinc-800 mb-1">2) Open the Terminal</h4>
+                  <p className="text-sm text-zinc-600 mb-1">In Cursor: <strong>View &rarr; Terminal</strong></p>
+                  <p className="text-sm text-zinc-600">You&apos;re now in the Terminal. The next steps (installing Node and creating your project) all happen here.</p>
+                </div>
 
-                  {/* Accordion: Already have Node? */}
-                  <details className="group rounded-lg border border-zinc-200 bg-zinc-50 mb-4">
-                    <summary className="cursor-pointer select-none list-none px-4 py-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-zinc-700">Already have Node installed?</span>
-                        <svg className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </div>
-                    </summary>
-                    <div className="px-4 pb-4 space-y-3">
-                      <p className="text-xs font-medium text-zinc-500">Let&apos;s check if Node is already installed</p>
-                      <p className="text-xs text-zinc-500 leading-relaxed">
-                        If you see a version number, you can skip the install steps below and proceed to &quot;Create your project.&quot; If you get &quot;command not found,&quot; follow the Homebrew + Node install steps below.
-                      </p>
-                      <div className="rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
-                        <code className="text-emerald-400 text-sm font-mono">node -v</code>
-                        <button
-                          onClick={() => copyCmd("node -v", "node-check")}
-                          className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                            copiedCmd === "node-check" ? "bg-emerald-600 text-white" : "ab-btn-primary"
-                          }`}
-                        >
-                          {copiedCmd === "node-check" ? "\u2713 Copied!" : "Copy"}
-                        </button>
-                      </div>
-                    </div>
-                  </details>
+                <hr className="border-zinc-200" />
 
-                  {/* Default install flow */}
-                  <div className="space-y-4">
-                    {/* 1. Install Homebrew */}
-                    <div>
-                      <p className="text-sm font-medium text-zinc-700 mb-2">1. Install Homebrew</p>
+                {/* ── Node pre-check callout (non-step) ── */}
+                <div className="rounded-md bg-amber-50 border border-amber-200 p-4 space-y-3">
+                  <p className="text-sm font-semibold text-amber-900">
+                    If you already have Node.js installed on your computer, you can skip the Install Homebrew and Node steps below.
+                  </p>
+                  <p className="text-sm text-amber-800">Let&apos;s check if Node is already installed:</p>
+                  <div className="rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
+                    <code className="text-emerald-400 text-sm font-mono">node -v</code>
+                    <button
+                      onClick={() => copyCmd("node -v", "node-check")}
+                      className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                        copiedCmd === "node-check" ? "bg-emerald-600 text-white" : "ab-btn-primary"
+                      }`}
+                    >
+                      {copiedCmd === "node-check" ? "\u2713 Copied!" : "Copy"}
+                    </button>
+                  </div>
+                  <p className="text-xs text-amber-800 leading-relaxed">
+                    If you see a version number, you can skip ahead to Step 7 &mdash; &quot;Create your project.&quot;<br />
+                    If you get &quot;command not found,&quot; follow the Homebrew + Node install steps below.
+                  </p>
+                </div>
+
+                {/* ── Terminal install steps ── */}
+                <div className="space-y-4">
+                  {/* 3. Install Homebrew */}
+                  <div>
+                    <p className="text-sm font-medium text-zinc-700 mb-2">3) Install Homebrew (Terminal)</p>
                       <div className="rounded-lg bg-zinc-950 px-4 py-3">
                         <div className="flex items-start justify-between gap-3">
                           <code className="text-emerald-400 text-xs font-mono leading-relaxed break-all">
@@ -705,7 +703,7 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
 
                     {/* 2. Activate Homebrew */}
                     <div>
-                      <p className="text-sm font-medium text-zinc-700 mb-2">2. Activate Homebrew</p>
+                      <p className="text-sm font-medium text-zinc-700 mb-2">4) Activate Homebrew (Terminal)</p>
                       <div className="rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
                         <code className="text-emerald-400 text-sm font-mono break-all">{'eval "$(/opt/homebrew/bin/brew shellenv)"'}</code>
                         <button
@@ -733,7 +731,7 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
 
                     {/* 3. Install Node */}
                     <div>
-                      <p className="text-sm font-medium text-zinc-700 mb-2">3. Install Node</p>
+                      <p className="text-sm font-medium text-zinc-700 mb-2">5) Install Node (Terminal)</p>
                       <div className="rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
                         <code className="text-emerald-400 text-sm font-mono">brew install node</code>
                         <button
@@ -749,7 +747,7 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
 
                     {/* 4. Confirm installation */}
                     <div>
-                      <p className="text-sm font-medium text-zinc-700 mb-2">4. Confirm installation</p>
+                      <p className="text-sm font-medium text-zinc-700 mb-2">6) Confirm installation (Terminal)</p>
                       <div className="rounded-lg bg-zinc-950 px-4 py-3 flex items-center justify-between gap-3">
                         <code className="text-emerald-400 text-sm font-mono">node -v</code>
                         <button
@@ -764,13 +762,12 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                       <p className="text-xs text-zinc-500 mt-2">If a version number appears, you&apos;re ready to build.</p>
                     </div>
                   </div>
-                </div>
 
                 <hr className="border-zinc-200" />
 
-                {/* ── Create your project ── */}
+                {/* ── 7: Create your project (Terminal) ── */}
                 <div>
-                  <h4 className="text-sm font-semibold text-zinc-800 mb-2">Create your project</h4>
+                  <h4 className="text-sm font-semibold text-zinc-800 mb-2">7) Create your project (Terminal)</h4>
                   <p className="text-sm text-zinc-600 mb-3">Paste this into Cursor&apos;s terminal:</p>
 
                   <div className="relative rounded-lg bg-zinc-950 p-4 font-mono text-sm">
@@ -810,6 +807,12 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                 </div>
               </section>
 
+              {/* ── Transition: Terminal → Chat ── */}
+              <div className="pt-2 pb-1">
+                <h3 className="text-base font-semibold text-zinc-900">Now you&apos;re ready to build the app</h3>
+                <p className="mt-1 text-sm text-zinc-600">Switch to Cursor Chat. From this point forward, paste prompts into Chat &mdash; not the Terminal.</p>
+              </div>
+
               {/* ── Steps 1–N: Cursor prompts ── */}
               {Array.isArray(plan.steps) && plan.steps.map((step: BuildStep, i: number) => {
                 const promptText = step?.cursorPrompt ?? "";
@@ -823,21 +826,18 @@ export default function IdeaDetailView({ ideaId }: { ideaId: string }) {
                     key={i}
                     className="rounded-xl border border-zinc-200 bg-white p-6"
                   >
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="flex items-center justify-center h-7 w-7 rounded-full bg-zinc-100 text-xs font-bold text-zinc-600">
-                        {stepNumber}
-                      </span>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                      <h3 className="text-sm font-semibold text-zinc-900">Prompt {stepNumber}: {titleLabel}</h3>
                       <span className="ab-role-badge rounded-full px-2.5 py-0.5 text-xs font-medium">{expandRole(roleLabel)}</span>
-                      <h3 className="text-sm font-semibold text-zinc-900 flex-1">{titleLabel}</h3>
                     </div>
+                    <p className="text-sm text-zinc-600 mb-3">
+                      Paste into Cursor Chat, not Terminal.{" "}
+                      <kbd className="rounded border border-zinc-300 bg-zinc-100 px-1 py-0.5 text-[10px]">Cmd+L</kbd> / <kbd className="rounded border border-zinc-300 bg-zinc-100 px-1 py-0.5 text-[10px]">Ctrl+L</kbd>
+                    </p>
 
                     {goalLabel && (
                       <p className="text-sm text-zinc-600 mb-3">{goalLabel}</p>
                     )}
-
-                    <p className="text-xs text-zinc-500 mb-3">
-                      Paste into Cursor chat (<kbd className="rounded border border-zinc-300 bg-zinc-100 px-1 py-0.5 text-[10px]">Cmd+L</kbd> / <kbd className="rounded border border-zinc-300 bg-zinc-100 px-1 py-0.5 text-[10px]">Ctrl+L</kbd>):
-                    </p>
 
                     <div className="relative rounded-lg bg-zinc-950 p-4">
                       <pre className="text-xs text-zinc-300 whitespace-pre-wrap font-mono leading-relaxed pr-20">
